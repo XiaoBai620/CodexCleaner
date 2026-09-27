@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+ <meta charset="utf-8">
+ <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+ <title>Codex 本地清理台</title>
+ <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<svg class="icon-sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+ <symbol id="icon-chat" viewBox="0 0 24 24"><path d="M6 4.5H18Q20.5 4.5 20.5 7V14Q20.5 16.5 18 16.5H10L5 20V16.5Q3.5 16.5 3.5 14V7Q3.5 4.5 6 4.5Z"/><path d="M7.5 8.5H16.5M7.5 12H13.5"/></symbol>
+ <symbol id="icon-memory" viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="1.5"/><path d="M9.5 3.5V6.5M14.5 3.5V6.5M9.5 17.5V20.5M14.5 17.5V20.5M3.5 9.5H6.5M3.5 14.5H6.5M17.5 9.5H20.5M17.5 14.5H20.5M9.5 10H14.5M9.5 14H14.5"/></symbol>
+ <symbol id="icon-folder" viewBox="0 0 24 24"><path d="M3.5 9.5V6Q3.5 4.5 5 4.5H9.5L12 7H19Q20.5 7 20.5 8.5V18Q20.5 19.5 19 19.5H5Q3.5 19.5 3.5 18V9.5H20.5"/></symbol>
+ <symbol id="icon-file" viewBox="0 0 24 24"><rect x="5.5" y="3.5" width="13" height="17" rx="1.5"/><path d="M9 8H15M9 12H15M9 16H12.5"/></symbol>
+ <symbol id="icon-refresh" viewBox="0 0 24 24"><path d="M4.5 10Q6 4.5 12 4.5Q17 4.5 19.5 9M19.5 14Q18 19.5 12 19.5Q7 19.5 4.5 15"/><polyline points="19.5 4.5 19.5 9 15 9"/><polyline points="4.5 19.5 4.5 15 9 15"/></symbol>
+ <symbol id="icon-repair" viewBox="0 0 24 24"><path d="M17 3.5L14 6.5L17.5 10L20.5 7Q21 13 14.5 12L7 19.5Q5.5 21 4 19.5Q2.5 18 4 16.5L11.5 9Q10.5 3 17 3.5Z"/><circle cx="5.5" cy="18" r=".5"/></symbol>
+ <symbol id="icon-search" viewBox="0 0 24 24"><circle cx="10" cy="10" r="6"/><line x1="14.5" y1="14.5" x2="20" y2="20"/></symbol>
+ <symbol id="icon-close" viewBox="0 0 24 24"><line x1="6.5" y1="6.5" x2="17.5" y2="17.5"/><line x1="6.5" y1="17.5" x2="17.5" y2="6.5"/></symbol>
+ <symbol id="icon-arrow" viewBox="0 0 24 24"><line x1="4.5" y1="12" x2="19.5" y2="12"/><polyline points="15 7.5 19.5 12 15 16.5"/></symbol>
+ <symbol id="icon-up" viewBox="0 0 24 24"><line x1="12" y1="19.5" x2="12" y2="4.5"/><polyline points="7.5 9 12 4.5 16.5 9"/></symbol>
+ <symbol id="icon-power" viewBox="0 0 24 24"><line x1="12" y1="3.5" x2="12" y2="11.5"/><path d="M7 6Q4 8.5 4 12.5A8 8 0 0 0 20 12.5Q20 8.5 17 6"/></symbol>
+ <symbol id="icon-shield" viewBox="0 0 24 24"><path d="M12 3.5L19.5 6V11.5Q19.5 17 12 20.5Q4.5 17 4.5 11.5V6Z"/><polyline points="8.5 11.5 11 14 15.5 9.5"/></symbol>
+</svg>
+<div class="shell">
+ <header class="topbar">
+  <div class="brand"><span class="brand-mark">C</span><span>本地清理台</span><span class="version" id="app-version"></span></div>
+  <nav class="navigation" aria-label="主导航">
+   <button class="nav active" data-view="chats" aria-current="page"><svg class="icon" aria-hidden="true"><use href="#icon-chat"/></svg><span>聊天记录</span><b id="nav-count">—</b></button>
+   <button class="nav" data-view="memory"><svg class="icon" aria-hidden="true"><use href="#icon-memory"/></svg><span>本地记忆</span></button>
+   <button class="nav" data-view="files"><svg class="icon" aria-hidden="true"><use href="#icon-folder"/></svg><span>文件用途</span></button>
+  </nav>
+  <div class="app-actions">
+   <button id="refresh" class="button quiet"><svg class="icon" aria-hidden="true"><use href="#icon-refresh"/></svg><span>刷新</span></button>
+   <button id="shutdown" class="button quiet"><svg class="icon" aria-hidden="true"><use href="#icon-power"/></svg><span>退出工具</span></button>
+  </div>
+ </header>
+ <main>
+  <span id="view-label" class="sr-only">聊天记录</span>
+  <div id="status-banner" class="status-banner loading" role="status">
+   <span class="status-dot" aria-hidden="true"></span>
+   <div class="status-copy"><strong id="status-title">正在检查本机状态</strong><p id="status-detail">只读取记录和文件信息。</p></div>
+   <span id="process-pill" class="pill">检查中</span>
+  </div>
+  <div id="alerts" aria-live="polite"></div>
+  <section class="page view" id="view-chats" aria-label="聊天记录">
+   <div class="card chat-card">
+    <div class="card-toolbar">
+     <div class="list-title"><h1>聊天记录</h1><span id="chat-total" class="muted">正在读取…</span></div>
+     <div class="toolbar-actions">
+      <label class="search"><svg class="icon" aria-hidden="true"><use href="#icon-search"/></svg><input id="chat-search" type="search" aria-label="搜索聊天" placeholder="搜索标题或 ID"></label>
+      <button id="repair" class="button secondary"><svg class="icon" aria-hidden="true"><use href="#icon-repair"/></svg><span>检查失效引用</span></button>
+     </div>
+    </div>
+    <div class="table-scroll"><table class="chat-table"><thead><tr><th class="checkbox-cell"><label class="check-target"><input id="select-all" type="checkbox" aria-label="选择当前列表中所有可清理聊天"></label></th><th>聊天</th><th>最近更新</th><th>状态</th></tr></thead><tbody id="chat-list"></tbody></table></div>
+    <div id="chat-empty" class="empty hidden">没有匹配的聊天。</div>
+    <div class="selection-options">
+     <label><input id="chats-memory" type="checkbox"><span><strong>同时清空全部本地记忆</strong><small>合并记忆可能涉及多条聊天</small></span></label>
+     <label><input id="chats-shared" type="checkbox"><span><strong>同时清空共享历史与日志</strong><small>会影响所有聊天的共享输入历史与数据库日志</small></span></label>
+    </div>
+   </div>
+   <details class="scope-note"><summary>清理范围说明</summary><p>列表包含已归档聊天，只显示标题与时间。项目、插件、技能、语音文件以及派生聊天中复制的内容另行保留。清理范围由你选择，不会定时或自动删除。</p></details>
+  </section>
+  <section class="page view hidden" id="view-memory" aria-labelledby="memory-heading">
+   <div class="page-heading"><h1 id="memory-heading">本地记忆</h1><p>管理这台电脑保存的记忆。</p></div>
+   <div class="memory-grid">
+    <div class="card memory-card">
+     <div class="section-title"><span class="icon-tile"><svg class="icon" aria-hidden="true"><use href="#icon-memory"/></svg></span><div><h2>清空全部本地记忆</h2><p class="muted">聊天记录可以继续保留</p></div></div>
+     <p>删除已识别的记忆提取结果和生成文件。合并记忆可能包含多条聊天，因此按全部记忆处理。</p>
+     <label class="large-check"><input id="memory-all" type="checkbox"><span>加入本次清理</span></label>
+    </div>
+    <div class="card memory-card">
+     <div class="section-title"><span class="icon-tile neutral"><svg class="icon" aria-hidden="true"><use href="#icon-refresh"/></svg></span><div><h2>避免再次生成</h2><p class="muted">清空记录不会关闭记忆功能</p></div></div>
+     <p>继续启用记忆并保留旧聊天时，之后可能再次生成记忆。</p>
+     <div class="instruction">如需停止生成，请在当前版本 Codex 的记忆设置中关闭相应功能。设置入口可能随版本变化。</div>
+    </div>
+   </div>
+   <div class="inline-note"><svg class="icon" aria-hidden="true"><use href="#icon-shield"/></svg><p>仅清理已识别的本机记忆，不影响 ChatGPT 云端记忆。<span id="memory-warnings"></span></p></div>
+  </section>
+  <section class="page view hidden" id="view-files" aria-label="文件用途">
+   <div class="page-heading"><h1>文件用途</h1><p>展开目录，查看每个文件的作用和处理方式。</p></div>
+   <div class="path-box"><span>数据目录</span><code id="data-root">正在读取…</code></div>
+   <div class="card">
+    <div class="card-toolbar"><div id="breadcrumbs" class="breadcrumbs" aria-label="当前目录"></div><button id="file-up" class="button secondary"><svg class="icon" aria-hidden="true"><use href="#icon-up"/></svg><span>上一级</span></button></div>
+    <div class="table-scroll"><table class="file-table"><thead><tr><th>名称</th><th>用途</th><th>处理方式</th><th>大小</th></tr></thead><tbody id="file-list"></tbody></table></div>
+    <div id="file-empty" class="empty hidden">此目录为空。</div>
+   </div>
+   <p class="hint">未知文件会明确标注并保留。“保留”不代表文件中没有个人数据。</p>
+   <div id="file-detail" class="card detail-card hidden"></div>
+  </section>
+ </main>
+ <footer id="selection-bar" class="selection-bar">
+  <div class="selection-copy"><strong id="selection-summary">尚未选择清理内容</strong><span id="selection-caption">核对预览后，一次确认即可删除。</span></div>
+  <button id="preview" class="button primary" disabled><span>预览清理范围</span><svg class="icon" aria-hidden="true"><use href="#icon-arrow"/></svg></button>
+ </footer>
+</div>
+<dialog id="review-dialog" aria-labelledby="dialog-title">
+ <div class="dialog-head"><h2 id="dialog-title">确认清理范围</h2><button id="close-dialog" class="icon-button" aria-label="关闭确认窗口"><svg class="icon" aria-hidden="true"><use href="#icon-close"/></svg></button></div>
+ <div class="dialog-scroll"><div id="dialog-content" class="dialog-content"></div><div id="dialog-error" class="dialog-error hidden" role="alert"></div></div>
+ <div class="dialog-footer"><p id="confirm-status">正在检查进程状态…</p><div class="dialog-actions"><button id="cancel-dialog" class="button secondary">取消</button><button id="confirm-action" class="button danger" disabled>确认删除</button></div></div>
+</dialog>
+<div id="toast" class="toast hidden" role="status"></div>
+<script src="/app.js"></script>
+</body>
+</html>

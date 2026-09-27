@@ -1,0 +1,34 @@
+name: 错误报告 / Bug report
+description: 用版本信息和合成复现描述问题，请勿上传个人数据。
+title: '[Bug] '
+body:
+  - type: markdown
+    attributes:
+      value: 请勿上传真实聊天、数据库、日志、用户名路径、认证值或带 token 的启动链接。安全问题请先阅读 SECURITY.md。
+  - type: input
+    id: version
+    attributes:
+      label: CodexCleaner 版本
+      placeholder: 例如 2.2.0
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Windows、Node.js、Codex 和浏览器版本
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      description: 使用虚构数据描述操作；说明是否退出了所有数据写入程序。
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: 预期与实际行为
+      description: 可贴已移除个人路径和内容的错误信息；不需要提供原始文件。
+    validations:
+      required: true

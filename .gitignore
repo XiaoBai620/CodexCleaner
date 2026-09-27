@@ -1,0 +1,22 @@
+# Generated release archives and temporary local work
+/dist/
+/coverage/
+/work/
+/outputs/
+/node_modules/
+*.log
+*.tmp
+*.zip
+*.sqlite*
+*.db
+*.db-*
+*.jsonl
+.env
+.env.*
+.codex/
+Transactions/
+Recovery/
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

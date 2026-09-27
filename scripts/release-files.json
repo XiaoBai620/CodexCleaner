@@ -1,0 +1,39 @@
+{
+  "runtime": [
+    "LICENSE",
+    "NOTICE.md",
+    "package.json",
+    "server.cjs",
+    "Start-CodexCleaner.cmd",
+    "Start-CodexCleaner.ps1",
+    "lib/cleaner.cjs",
+    "public/app.js",
+    "public/index.html",
+    "public/style.css",
+    "使用说明.md",
+    "先读我.txt"
+  ],
+  "sourceOnly": [
+    ".gitattributes",
+    ".gitignore",
+    ".github/ISSUE_TEMPLATE/bug_report.yml",
+    ".github/pull_request_template.md",
+    ".github/workflows/ci.yml",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "README.md",
+    "SECURITY.md",
+    "package-lock.json",
+    "docs/architecture.md",
+    "docs/releasing.md",
+    "docs/screenshot.png",
+    "scripts/check.cjs",
+    "scripts/package.ps1",
+    "scripts/release-files.json",
+    "test/cleaner.test.cjs",
+    "test/fixture.cjs",
+    "test/fixture-schema.json",
+    "test/server.test.cjs",
+    "test/ui.test.cjs"
+  ]
+}
