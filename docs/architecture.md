@@ -4,11 +4,11 @@
 
 ## 数据结构
 
-以下名称及 `lib/cleaner.cjs` 中的结构指纹来自 2026-09-27 的兼容性检查，不是 Codex 对外保证的稳定 API，也不能推导出所有 Codex 发布版本都受支持。
+以下名称及 `lib/cleaner.cjs` 中的结构指纹来自 2026-10-31 的兼容性检查，不是 Codex 对外保证的稳定 API，也不能推导出所有 Codex 发布版本都受支持。
 
 | 数据库 | 处理对象 |
 |---|---|
-| `state_5.sqlite` | 聊天记录及直接关联表；项目定义保留 |
+| `state_5.sqlite` | 聊天记录及直接关联表（含已读回执、审核反馈）；被删父聊天的子聊天置空 `attached_thread_parent_id` 后保留；项目定义保留 |
 | `thread_history_1.sqlite` | 消息、轮次和实时历史投影 |
 | `memories_1.sqlite` | 直接提取记忆；明确全选时清理整理任务 |
 | `logs_2.sqlite` | 所选聊天日志；明确全选时清理全部数据库日志 |

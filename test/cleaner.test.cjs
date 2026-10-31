@@ -12,7 +12,7 @@ function setup(t, options={}) {const f=fixture();t.after(()=>f.dispose());const 
 function selection(ids=[],extra={}) {return {chatIds:ids,clearMemories:false,clearSharedHistory:false,...extra};}
 function checksum(file) {return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');}
 const linkedTables={
-  'state_5.sqlite':['threads','thread_attachments','thread_dynamic_tools'],
+  'state_5.sqlite':['threads','thread_attachments','thread_dynamic_tools','thread_read_receipts','guardian_review_feedback'],
   'thread_history_1.sqlite':['thread_turns','thread_items','thread_realtime_items','thread_history_projection_state'],
   'memories_1.sqlite':['stage1_outputs'],
   'logs_2.sqlite':['logs'],
@@ -289,6 +289,31 @@ test('repair removes orphan local catalog entries and invalidates catalog while 
   const plan=await f.cleaner.planRepair();await f.cleaner.executeRepair(plan.id);
   for(const table of tables){const leftovers=rows(f.dataRoot,'sqlite/codex-dev.db',table).filter(x=>x.thread_id===stale);assert.equal(leftovers.length,1,table);assert.equal(leftovers[0].host_id,'ssh:fixture');}
   assert.ok(rows(f.dataRoot,'sqlite/codex-dev.db','local_thread_catalog_metadata')[0].catalog_revision>10);assert.equal(rows(f.dataRoot,'state_5.sqlite','threads').length,2);noBackups(f);
+});
+
+test('deleting a parent chat detaches its attached child chats and keeps them listed',async t=>{
+  const f=setup(t);const db=open(f.dataRoot,'state_5.sqlite');db.prepare('UPDATE threads SET attached_thread_parent_id=? WHERE id=?').run(f.ids[0],f.ids[1]);db.close();
+  const plan=await f.cleaner.plan(selection([f.ids[0]]));
+  const tables=plan.databases.find(d=>d.path==='state_5.sqlite').tables;
+  assert.deepEqual(tables.find(x=>x.action==='clear-reference'),{name:'threads',rows:1,action:'clear-reference'});
+  await f.cleaner.execute(plan.id);
+  const threads=rows(f.dataRoot,'state_5.sqlite','threads');assert.deepEqual(threads.map(x=>x.id),[f.ids[1]]);assert.equal(threads[0].attached_thread_parent_id,null);
+  assert.deepEqual(rows(f.dataRoot,'state_5.sqlite','thread_read_receipts').map(x=>x.thread_id),[f.ids[1]]);noBackups(f);
+});
+
+test('deleting parent and child together needs no detach step',async t=>{
+  const f=setup(t);const db=open(f.dataRoot,'state_5.sqlite');db.prepare('UPDATE threads SET attached_thread_parent_id=? WHERE id=?').run(f.ids[0],f.ids[1]);db.close();
+  const plan=await f.cleaner.plan(selection(f.ids));
+  assert.equal(plan.databases.find(d=>d.path==='state_5.sqlite').tables.find(x=>x.action==='clear-reference').rows,0);
+  await f.cleaner.execute(plan.id);assert.equal(rows(f.dataRoot,'state_5.sqlite','threads').length,0);noBackups(f);
+});
+
+test('repair clears stale read receipts and attached parent references without deleting live chats',async t=>{
+  const f=setup(t);const stale='33333333-3333-4333-8333-333333333333';const db=open(f.dataRoot,'state_5.sqlite');
+  insert(db,'thread_read_receipts',{thread_id:stale,revision:'1'});db.prepare('UPDATE threads SET attached_thread_parent_id=? WHERE id=?').run(stale,f.ids[1]);db.close();
+  const plan=await f.cleaner.planRepair();assert.deepEqual(plan.chatIds,[stale]);await f.cleaner.executeRepair(plan.id);
+  const threads=rows(f.dataRoot,'state_5.sqlite','threads');assert.equal(threads.length,2);assert.ok(threads.every(x=>x.attached_thread_parent_id===null));
+  assert.deepEqual(rows(f.dataRoot,'state_5.sqlite','thread_read_receipts').map(x=>x.thread_id).sort(),[...f.ids].sort());noBackups(f);
 });
 
 test('repair does not guess that an unknown pinned or remote-only identifier belongs to the local database',async t=>{

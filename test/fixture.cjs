@@ -56,6 +56,8 @@ function populateFixture(base,dispose) {
       insert(db,'threads',{id,rollout_path:rolloutPaths[i],created_at:1780000000+i,updated_at:1780001000+i,source:'cli',model_provider:'fixture',cwd:base,title:`Synthetic chat ${i+1}`,sandbox_policy:'workspace-write',approval_mode:'on-request'});
       insert(db,'thread_attachments',{id:`attachment-${i}`,thread_id:id,attachment_type:'file',identity_key:`fake-${i}`,payload:'{"synthetic":true}',created_at:1});
       insert(db,'thread_dynamic_tools',{thread_id:id,position:0,name:'fixture',description:'Invented tool',input_schema:'{}'});
+      insert(db,'thread_read_receipts',{thread_id:id,first_unread_turn:'turn',revision:'1'});
+      insert(db,'guardian_review_feedback',{id:`feedback-${i}`,thread_id:id,record:Buffer.from('{"synthetic":true}')});
     });
     insert(db,'thread_spawn_edges',{parent_thread_id:IDS[0],child_thread_id:IDS[1],status:'completed'});
     db.close();

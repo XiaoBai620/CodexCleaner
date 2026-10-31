@@ -183,7 +183,7 @@
     {
       "name": "threads",
       "type": "table",
-      "sql": "CREATE TABLE threads (\r\n    id TEXT PRIMARY KEY,\r\n    rollout_path TEXT NOT NULL,\r\n    created_at INTEGER NOT NULL,\r\n    updated_at INTEGER NOT NULL,\r\n    source TEXT NOT NULL,\r\n    model_provider TEXT NOT NULL,\r\n    cwd TEXT NOT NULL,\r\n    title TEXT NOT NULL,\r\n    sandbox_policy TEXT NOT NULL,\r\n    approval_mode TEXT NOT NULL,\r\n    tokens_used INTEGER NOT NULL DEFAULT 0,\r\n    has_user_event INTEGER NOT NULL DEFAULT 0,\r\n    archived INTEGER NOT NULL DEFAULT 0,\r\n    archived_at INTEGER,\r\n    git_sha TEXT,\r\n    git_branch TEXT,\r\n    git_origin_url TEXT\r\n, cli_version TEXT NOT NULL DEFAULT '', first_user_message TEXT NOT NULL DEFAULT '', agent_nickname TEXT, agent_role TEXT, memory_mode TEXT NOT NULL DEFAULT 'enabled', model TEXT, reasoning_effort TEXT, agent_path TEXT, created_at_ms INTEGER, updated_at_ms INTEGER, thread_source TEXT, preview TEXT NOT NULL DEFAULT '', recency_at INTEGER NOT NULL DEFAULT 0, recency_at_ms INTEGER NOT NULL DEFAULT 0, history_mode TEXT NOT NULL DEFAULT 'legacy', name TEXT, is_pinned INTEGER NOT NULL DEFAULT 0, thread_section_id TEXT\r\n    REFERENCES thread_sections(id) ON DELETE SET NULL, section_position INTEGER, section_entered_at_ms INTEGER, project_id TEXT\r\n    REFERENCES projects(id) ON DELETE SET NULL, originator TEXT, daybreak_enabled BOOLEAN, creator_user_id TEXT, creator_account_id TEXT)"
+      "sql": "CREATE TABLE threads (\r\n    id TEXT PRIMARY KEY,\r\n    rollout_path TEXT NOT NULL,\r\n    created_at INTEGER NOT NULL,\r\n    updated_at INTEGER NOT NULL,\r\n    source TEXT NOT NULL,\r\n    model_provider TEXT NOT NULL,\r\n    cwd TEXT NOT NULL,\r\n    title TEXT NOT NULL,\r\n    sandbox_policy TEXT NOT NULL,\r\n    approval_mode TEXT NOT NULL,\r\n    tokens_used INTEGER NOT NULL DEFAULT 0,\r\n    has_user_event INTEGER NOT NULL DEFAULT 0,\r\n    archived INTEGER NOT NULL DEFAULT 0,\r\n    archived_at INTEGER,\r\n    git_sha TEXT,\r\n    git_branch TEXT,\r\n    git_origin_url TEXT\r\n, cli_version TEXT NOT NULL DEFAULT '', first_user_message TEXT NOT NULL DEFAULT '', agent_nickname TEXT, agent_role TEXT, memory_mode TEXT NOT NULL DEFAULT 'enabled', model TEXT, reasoning_effort TEXT, agent_path TEXT, created_at_ms INTEGER, updated_at_ms INTEGER, thread_source TEXT, preview TEXT NOT NULL DEFAULT '', recency_at INTEGER NOT NULL DEFAULT 0, recency_at_ms INTEGER NOT NULL DEFAULT 0, history_mode TEXT NOT NULL DEFAULT 'legacy', name TEXT, is_pinned INTEGER NOT NULL DEFAULT 0, thread_section_id TEXT\r\n    REFERENCES thread_sections(id) ON DELETE SET NULL, section_position INTEGER, section_entered_at_ms INTEGER, project_id TEXT\r\n    REFERENCES projects(id) ON DELETE SET NULL, originator TEXT, daybreak_enabled BOOLEAN, creator_user_id TEXT, creator_account_id TEXT, attached_thread_parent_id TEXT)"
     },
     {
       "name": "threads_created_at_ms_after_insert",
@@ -209,6 +209,41 @@
       "name": "threads_updated_at_ms_after_update",
       "type": "trigger",
       "sql": "CREATE TRIGGER threads_updated_at_ms_after_update\r\nAFTER UPDATE OF updated_at ON threads\r\nWHEN NEW.updated_at != OLD.updated_at\r\n AND NEW.updated_at_ms IS OLD.updated_at_ms\r\nBEGIN\r\n    UPDATE threads\r\n    SET updated_at_ms = NEW.updated_at * 1000\r\n    WHERE id = NEW.id;\r\nEND"
+    },
+    {
+      "name": "idx_thread_attachments_identity_thread",
+      "type": "index",
+      "sql": "CREATE INDEX idx_thread_attachments_identity_thread\r\n    ON thread_attachments(attachment_type, identity_key, thread_id)"
+    },
+    {
+      "name": "idx_threads_archive_created_at_ms",
+      "type": "index",
+      "sql": "CREATE INDEX idx_threads_archive_created_at_ms\r\n    ON threads(archived, created_at_ms DESC, id DESC)\r\n    WHERE archived = 1"
+    },
+    {
+      "name": "idx_threads_archive_recency_at_ms",
+      "type": "index",
+      "sql": "CREATE INDEX idx_threads_archive_recency_at_ms\r\n    ON threads(archived, recency_at_ms DESC, id DESC)\r\n    WHERE archived = 1"
+    },
+    {
+      "name": "idx_threads_archive_updated_at_ms",
+      "type": "index",
+      "sql": "CREATE INDEX idx_threads_archive_updated_at_ms\r\n    ON threads(archived, updated_at_ms DESC, id DESC)\r\n    WHERE archived = 1"
+    },
+    {
+      "name": "idx_threads_attached_parent",
+      "type": "index",
+      "sql": "CREATE INDEX idx_threads_attached_parent ON threads(attached_thread_parent_id)\r\n    WHERE attached_thread_parent_id IS NOT NULL"
+    },
+    {
+      "name": "guardian_review_feedback",
+      "type": "table",
+      "sql": "CREATE TABLE guardian_review_feedback (\r\n    id TEXT PRIMARY KEY NOT NULL,\r\n    thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,\r\n    record BLOB NOT NULL\r\n)"
+    },
+    {
+      "name": "thread_read_receipts",
+      "type": "table",
+      "sql": "CREATE TABLE thread_read_receipts (\r\n    thread_id TEXT PRIMARY KEY NOT NULL,\r\n    first_unread_turn TEXT,\r\n    revision TEXT NOT NULL,\r\n    last_published_turn TEXT\r\n)"
     }
   ],
   "memories_1.sqlite": [
@@ -317,7 +352,7 @@
     {
       "name": "thread_turns",
       "type": "table",
-      "sql": "CREATE TABLE thread_turns (\r\n    thread_id TEXT NOT NULL,\r\n    turn_id TEXT NOT NULL,\r\n    rollout_ordinal INTEGER NOT NULL,\r\n    status TEXT NOT NULL,\r\n    error_json TEXT,\r\n    started_at INTEGER,\r\n    completed_at INTEGER,\r\n    duration_ms INTEGER,\r\n    first_user_item_id TEXT,\r\n    final_agent_item_id TEXT, rollout_byte_offset INTEGER, rollout_end_ordinal INTEGER, rollout_end_byte_offset INTEGER,\r\n    PRIMARY KEY (thread_id, turn_id)\r\n)"
+      "sql": "CREATE TABLE thread_turns (\r\n    thread_id TEXT NOT NULL,\r\n    turn_id TEXT NOT NULL,\r\n    rollout_ordinal INTEGER NOT NULL,\r\n    status TEXT NOT NULL,\r\n    error_json TEXT,\r\n    started_at INTEGER,\r\n    completed_at INTEGER,\r\n    duration_ms INTEGER,\r\n    first_user_item_id TEXT,\r\n    final_agent_item_id TEXT, rollout_byte_offset INTEGER, rollout_end_ordinal INTEGER, rollout_end_byte_offset INTEGER, root_turn_id TEXT,\r\n    PRIMARY KEY (thread_id, turn_id)\r\n)"
     }
   ],
   "logs_2.sqlite": [
@@ -415,7 +450,7 @@
     {
       "name": "automations",
       "type": "table",
-      "sql": "CREATE TABLE automations (\n            id TEXT PRIMARY KEY,\n            name TEXT NOT NULL,\n            prompt TEXT NOT NULL,\n            status TEXT NOT NULL DEFAULT 'ACTIVE',\n            next_run_at INTEGER,\n            last_run_at INTEGER,\n            cwds TEXT NOT NULL DEFAULT '[]',\n            rrule TEXT NOT NULL DEFAULT 'FREQ=HOURLY;INTERVAL=24;BYMINUTE=0',\n            model TEXT,\n            reasoning_effort TEXT,\n            created_at INTEGER NOT NULL,\n            updated_at INTEGER NOT NULL\n          , target_type TEXT, project_id TEXT, kind TEXT NOT NULL DEFAULT 'cron', target_thread_id TEXT, execution_environment TEXT, local_environment_config_path TEXT, plugin_template_id TEXT, notification_policy TEXT, account_id TEXT, user_id TEXT, installation_id TEXT, legacy_automation_id TEXT, auto_archive INTEGER NOT NULL DEFAULT 0)"
+      "sql": "CREATE TABLE automations (\n            id TEXT PRIMARY KEY,\n            name TEXT NOT NULL,\n            prompt TEXT NOT NULL,\n            status TEXT NOT NULL DEFAULT 'ACTIVE',\n            next_run_at INTEGER,\n            last_run_at INTEGER,\n            cwds TEXT NOT NULL DEFAULT '[]',\n            rrule TEXT NOT NULL DEFAULT 'FREQ=HOURLY;INTERVAL=24;BYMINUTE=0',\n            model TEXT,\n            reasoning_effort TEXT,\n            created_at INTEGER NOT NULL,\n            updated_at INTEGER NOT NULL\n          , target_type TEXT, project_id TEXT, kind TEXT NOT NULL DEFAULT 'cron', target_thread_id TEXT, execution_environment TEXT, local_environment_config_path TEXT, plugin_template_id TEXT, notification_policy TEXT, account_id TEXT, user_id TEXT, installation_id TEXT, legacy_automation_id TEXT, auto_archive INTEGER NOT NULL DEFAULT 0, next_run_nominal_at INTEGER)"
     },
     {
       "name": "automations_owner_idx",
@@ -435,7 +470,7 @@
     {
       "name": "live_visualization_suggestions",
       "type": "table",
-      "sql": "CREATE TABLE live_visualization_suggestions (\n          account_id TEXT NOT NULL,\n          user_id TEXT NOT NULL,\n          host_id TEXT NOT NULL,\n          thread_id TEXT NOT NULL,\n          id TEXT NOT NULL,\n          title TEXT NOT NULL,\n          description TEXT NOT NULL,\n          status TEXT NOT NULL CHECK (status IN ('pending', 'accepted', 'dismissed')),\n          submission TEXT CHECK (submission IN ('submitted', 'accepted')),\n          PRIMARY KEY (account_id, user_id, host_id, thread_id)\n        ) WITHOUT ROWID"
+      "sql": "CREATE TABLE live_visualization_suggestions (\n          account_id TEXT NOT NULL,\n          user_id TEXT NOT NULL,\n          host_id TEXT NOT NULL,\n          thread_id TEXT NOT NULL,\n          id TEXT NOT NULL,\n          title TEXT NOT NULL,\n          description TEXT NOT NULL,\n          status TEXT NOT NULL CHECK (status IN ('pending', 'accepted', 'dismissed')),\n          submission TEXT CHECK (submission IN ('submitted', 'accepted')), turn_id TEXT, creation_turn_id TEXT,\n          PRIMARY KEY (account_id, user_id, host_id, thread_id)\n        ) WITHOUT ROWID"
     },
     {
       "name": "local_app_server_feature_enablement",
@@ -445,7 +480,7 @@
     {
       "name": "local_thread_catalog",
       "type": "table",
-      "sql": "CREATE TABLE \"local_thread_catalog\" (\n            host_id TEXT NOT NULL,\n            thread_id TEXT NOT NULL,\n            display_title TEXT NOT NULL,\n            source_created_at REAL NOT NULL,\n            source_updated_at REAL NOT NULL,\n            cwd TEXT,\n            source_kind TEXT NOT NULL,\n            source_detail TEXT,\n            model_provider TEXT,\n            git_branch TEXT,\n            observation_sequence INTEGER NOT NULL,\n            missing_candidate INTEGER NOT NULL DEFAULT 0\n              CHECK (missing_candidate IN (0, 1)),\n            thread_source TEXT,\n            source_recency_at REAL NOT NULL DEFAULT 0,\n            pending_observed_title INTEGER NOT NULL DEFAULT 0,\n            project_id TEXT,\n            conversation_origin TEXT, trial_conversation_type TEXT,\n            PRIMARY KEY (host_id, thread_id)\n          )"
+      "sql": "CREATE TABLE \"local_thread_catalog\" (\n            host_id TEXT NOT NULL,\n            thread_id TEXT NOT NULL,\n            display_title TEXT NOT NULL,\n            source_created_at REAL NOT NULL,\n            source_updated_at REAL NOT NULL,\n            cwd TEXT,\n            source_kind TEXT NOT NULL,\n            source_detail TEXT,\n            model_provider TEXT,\n            git_branch TEXT,\n            observation_sequence INTEGER NOT NULL,\n            missing_candidate INTEGER NOT NULL DEFAULT 0\n              CHECK (missing_candidate IN (0, 1)),\n            thread_source TEXT,\n            source_recency_at REAL NOT NULL DEFAULT 0,\n            pending_observed_title INTEGER NOT NULL DEFAULT 0,\n            project_id TEXT,\n            conversation_origin TEXT, trial_conversation_type TEXT, chatgpt_async_status INTEGER,\n            PRIMARY KEY (host_id, thread_id)\n          )"
     },
     {
       "name": "local_thread_catalog_created_idx",

@@ -1,5 +1,11 @@
 # 更新记录
 
+## 未发布
+
+- 适配 2026-10-31 检查到的 Codex 数据库结构：`state_5.sqlite`（迁移 62）、`thread_history_1.sqlite`（迁移 8）和 `sqlite/codex-dev.db`。旧指纹导致全部聊天无法识别。
+- 删除聊天时同步删除 `thread_read_receipts`、`guardian_review_feedback` 中的对应记录。
+- 删除父聊天时，附着的子聊天会置空 `attached_thread_parent_id` 并保留；“检查失效引用”也会修复这两类残留。
+
 ## 2.2.0
 
 - 整理为可独立提交到 GitHub 的项目，补充 MIT 许可证、文档、贡献与安全说明。
