@@ -45,15 +45,15 @@ exe 没有代码签名，首次运行时 SmartScreen 可能提示“未知发布
 需要 [.NET 10 SDK](https://dotnet.microsoft.com/)。
 
 ```powershell
-dotnet test
+dotnet test tests/CodexCleaner.Tests
 dotnet publish src/CodexCleaner -c Release -o dist
 ```
 
 测试在系统临时目录生成虚构数据，不读取也不修改真实的 `.codex`。发布步骤见 [发布指南](docs/releasing.md)。
 
 ```text
-src/CodexCleaner.Core/   清理引擎：结构校验、预览计划、事务执行与回滚、进程检测
 src/CodexCleaner/        WinForms 桌面界面
+src/CodexCleaner/Engine/ 清理引擎：结构校验、预览计划、事务执行与回滚、进程检测
 tests/                   合成数据与回归测试
 docs/                    使用说明、架构、发布、贡献与安全说明
 ```

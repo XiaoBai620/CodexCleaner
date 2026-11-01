@@ -20,9 +20,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
-          global-json-file: global.json
+          dotnet-version: '10.0.x'
       - name: Test with synthetic data
-        run: dotnet test -c Release
+        run: dotnet test tests/CodexCleaner.Tests -c Release
       - name: Publish single-file exe
         run: dotnet publish src/CodexCleaner -c Release -o dist
       - name: Write checksum

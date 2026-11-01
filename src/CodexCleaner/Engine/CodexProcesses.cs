@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace CodexCleaner.Core;
+namespace CodexCleaner.Engine;
 
 public static class CodexProcesses
 {

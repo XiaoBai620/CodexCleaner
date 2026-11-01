@@ -4,7 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
-namespace CodexCleaner.Core;
+namespace CodexCleaner.Engine;
 
 // Desktop JSON state is edited field by field: only references with a verified local
 // owner are touched, never arbitrary strings that happen to look like a chat ID.

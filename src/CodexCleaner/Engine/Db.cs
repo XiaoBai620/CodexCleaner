@@ -2,7 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Data.Sqlite;
 
-namespace CodexCleaner.Core;
+namespace CodexCleaner.Engine;
 
 internal static class Db
 {

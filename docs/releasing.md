@@ -1,7 +1,7 @@
 # 发布
 
-1. 更新 `Directory.Build.props` 中的 `<Version>` 和 `CHANGELOG.md`。
-2. 运行 `dotnet test`，并用虚构数据或测试用的 `CODEX_HOME` 手动检查一遍界面：列表、搜索、全选、预览、确认、检查失效引用，以及 Codex 运行时确认按钮不可用。
+1. 更新 `src/CodexCleaner/CodexCleaner.csproj` 中的 `<Version>` 和 `CHANGELOG.md`。
+2. 运行 `dotnet test tests/CodexCleaner.Tests`，并用虚构数据或测试用的 `CODEX_HOME` 手动检查一遍界面：列表、搜索、全选、预览、确认、检查失效引用，以及 Codex 运行时确认按钮不可用。
 3. 生成单文件 exe 和校验文件：
 
    ```powershell

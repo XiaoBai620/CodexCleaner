@@ -2,7 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-namespace CodexCleaner.Core;
+namespace CodexCleaner.Engine;
 
 public sealed partial class Cleaner
 {

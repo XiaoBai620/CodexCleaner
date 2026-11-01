@@ -3,7 +3,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
-namespace CodexCleaner.Core;
+namespace CodexCleaner.Engine;
 
 public sealed partial class Cleaner
 {

@@ -4,7 +4,7 @@ using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Microsoft.Win32.SafeHandles;
 
-namespace CodexCleaner.Core;
+namespace CodexCleaner.Engine;
 
 public sealed class CleanerException(string message, Exception? inner = null) : Exception(message, inner);
 

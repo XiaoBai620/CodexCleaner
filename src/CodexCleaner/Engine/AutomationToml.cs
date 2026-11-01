@@ -2,7 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 
-namespace CodexCleaner.Core;
+namespace CodexCleaner.Engine;
 
 // Older automation definitions may exist only as TOML. Only top-level target keys count;
 // quoted prompt text that merely looks like a target must not block a chat.

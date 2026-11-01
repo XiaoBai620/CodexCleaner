@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace CodexCleaner.Core;
+namespace CodexCleaner.Engine;
 
 public sealed record ProcessState(bool Running, IReadOnlyList<string> Processes);
 

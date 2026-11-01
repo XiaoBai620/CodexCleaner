@@ -1,6 +1,6 @@
 # 贡献指南
 
-开发环境为 Windows 10/11 和 .NET 10 SDK。修改前后运行 `dotnet test`；界面修改还需要用虚构数据手动检查列表、搜索、全选、确认窗口和 Codex 运行时的禁用状态。
+开发环境为 Windows 10/11 和 .NET 10 SDK。修改前后运行 `dotnet test tests/CodexCleaner.Tests`；界面修改还需要用虚构数据手动检查列表、搜索、全选、确认窗口和 Codex 运行时的禁用状态。
 
 ## 数据处理原则
 
@@ -14,4 +14,4 @@
 
 PR 说明问题如何触发、修改后的行为、验证结果和仍未验证的范围。不要在 Issue、PR、截图或录屏中包含真实聊天、带用户名的路径或认证信息。
 
-版本只在 `Directory.Build.props` 中维护，窗口标题显示同一版本。新增 NuGet 依赖请固定版本，并说明理由。
+版本只在 `src/CodexCleaner/CodexCleaner.csproj` 中维护，窗口标题显示同一版本。新增 NuGet 依赖请固定版本，并说明理由。

@@ -1,4 +1,4 @@
-namespace CodexCleaner.Core;
+namespace CodexCleaner.Engine;
 
 // Storage layout observed on 2026-10-31. These are not a stable Codex API; any schema change disables writes.
 internal static class Catalog

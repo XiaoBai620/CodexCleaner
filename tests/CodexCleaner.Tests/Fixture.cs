@@ -2,7 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using CodexCleaner.Core;
+using CodexCleaner.Engine;
 using Microsoft.Data.Sqlite;
 
 namespace CodexCleaner.Tests;

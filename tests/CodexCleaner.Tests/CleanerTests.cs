@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json.Nodes;
-using CodexCleaner.Core;
+using CodexCleaner.Engine;
 
 namespace CodexCleaner.Tests;
 
