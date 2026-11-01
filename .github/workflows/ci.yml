@@ -18,15 +18,18 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-dotnet@v4
         with:
-          node-version: '24'
-      - name: Check source and release manifest
-        run: npm run check
+          global-json-file: global.json
       - name: Test with synthetic data
-        run: npm test
-      - name: Build and verify archives
-        run: npm run package
+        run: dotnet test -c Release
+      - name: Publish single-file exe
+        run: dotnet publish src/CodexCleaner -c Release -o dist
+      - name: Write checksum
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash dist/CodexCleaner.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  CodexCleaner.exe" | Set-Content -NoNewline -Encoding ascii dist/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
           name: CodexCleaner-${{ github.sha }}

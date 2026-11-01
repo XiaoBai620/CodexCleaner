@@ -4,18 +4,18 @@ title: '[Bug] '
 body:
   - type: markdown
     attributes:
-      value: 请勿上传真实聊天、数据库、日志、用户名路径、认证值或带 token 的启动链接。安全问题请先阅读 SECURITY.md。
+      value: 请勿上传真实聊天、数据库、日志、带用户名的路径或认证信息。安全问题请先阅读 SECURITY.md。
   - type: input
     id: version
     attributes:
       label: CodexCleaner 版本
-      placeholder: 例如 2.2.0
+      placeholder: 窗口标题中的版本，例如 3.0.0
     validations:
       required: true
   - type: input
     id: environment
     attributes:
-      label: Windows、Node.js、Codex 和浏览器版本
+      label: Windows 和 Codex 版本
     validations:
       required: true
   - type: textarea

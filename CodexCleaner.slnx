@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/CodexCleaner.Core/CodexCleaner.Core.csproj" />
+    <Project Path="src/CodexCleaner/CodexCleaner.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/CodexCleaner.Tests/CodexCleaner.Tests.csproj" />
+  </Folder>
+</Solution>

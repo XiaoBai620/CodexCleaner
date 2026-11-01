@@ -1,81 +1,69 @@
 # CodexCleaner · Codex 本地清理台
 
-一个手动控制的 Windows 本地工具：查看 Codex 文件用途，选择聊天与记忆，核对预览后一次确认删除，检查并修复已识别的失效聊天引用。
+Windows 桌面小工具：选择本机的 Codex 聊天与记忆，核对预览后一次确认删除，并修复指向已删除聊天的失效引用。
 
-**独立社区项目，与 OpenAI 无官方隶属关系。** 仅支持已验证的本机存储结构。数据格式变化时停止清理，需要适配后才能继续。
+**独立社区项目，与 OpenAI 无官方隶属关系。** 只支持已验证的本机存储结构；Codex 数据格式变化时会停止清理，等待工具适配。
 
-![使用虚构聊天数据的界面](docs/screenshot.png)
+## 使用
 
-## 能做什么
+需要 64 位 Windows 10/11。下载 `CodexCleaner.exe` 双击运行即可，不需要安装任何运行环境，也不会占用端口或打开浏览器。
 
-- 按标题或 ID 搜索、选择聊天，包括归档聊天，同步清理已识别的关联记录。
-- 单独清空已识别的本地记忆，或明确选择共享输入历史与数据库日志。
-- 查看文件与目录的用途、大小和处理方式；未知内容保留。
-- 预览并修复指向不存在聊天的本机项目迁移、归档、置顶等引用。
-- 使用紧凑界面、键盘操作和窄屏布局；不要求输入确认词，不设日常可恢复区。
+1. 完全退出 Codex 桌面应用、Codex 命令行和 Chrome 插件。窗口顶部会实时显示 Codex 是否仍在运行；运行期间可以浏览和预览，但不能执行。
+2. 勾选要删除的聊天（可按标题或 ID 搜索，已归档的聊天也会列出）。按需要勾选“清空全部本地记忆”“清空共享输入历史与日志”。
+3. 点击“预览清理范围”，核对聊天、数据库记录和文件，点击“确认删除”。
+4. 之前删除后在 Codex 里遇到项目或归档错误时，点击“检查失效引用”，核对后“确认修复”。
 
-项目、工作树、插件、技能、登录信息和定时任务定义不属于清理范围。删除是普通本地删除，无法通过工具撤销；云端记录、外部备份和未识别文件不受影响。详细范围见 [使用说明](使用说明.md)。
+exe 没有代码签名，首次运行时 SmartScreen 可能提示“未知发布者”，可以对照发布页的 `SHA256SUMS.txt` 核对文件。
 
-## 开始使用
+默认读取 `CODEX_HOME`，未设置时读取 `%USERPROFILE%\.codex`。所有处理都在本机完成。
 
-需要 **Windows 10/11、Node.js 24 或更新版本（含 `node:sqlite`）**，以及当前版本的 Edge、Chrome 或 Firefox。安装 Node.js 请使用 [官方网站](https://nodejs.org/)。工具没有 npm 运行依赖。
+更多说明见 [使用说明](使用说明.md)。
 
-1. 将发布 ZIP 完整解压到独立目录。
-2. 双击 `Start-CodexCleaner.cmd`，浏览器会打开本机界面。
-3. 完全退出 Codex 桌面应用、命令行和其他写入同一数据目录的进程。
-4. 勾选内容，点击“预览清理范围”，核对后点击“确认删除”。
-5. 完成后点击“退出工具”，再启动 Codex。仅关闭标签页不会停止后台服务。
+## 会删除什么
 
-默认读取 `CODEX_HOME`，未设置时读取 `%USERPROFILE%\.codex`。数据只在本机处理；HTTP 服务绑定 `127.0.0.1`，每次启动使用独立的访问凭证。
+| 选项 | 处理内容 |
+|---|---|
+| 勾选聊天 | 已验证数据库中属于该聊天的记录、原始会话文件、会话索引、输入历史中带该会话 ID 的行、桌面状态中识别出的该聊天字段，以及该聊天直接提取的记忆。附着在它下面的子聊天会解除关联并保留。 |
+| 清空全部本地记忆 | 记忆提取结果、记忆整理任务，以及 `memories`、`memories_v2`、`memories_extensions` 里的文件。 |
+| 清空共享输入历史与日志 | 桌面全局输入历史和 `logs_2.sqlite` 中的全部日志，会影响所有聊天。 |
+| 检查失效引用 | 只清除指向已不存在聊天的本机引用，保留现存聊天、项目和远端主机记录。 |
 
-也可以在项目目录运行：
+项目、工作树、插件、技能、设置、登录信息和自动化定义都不在清理范围。被自动化任务引用的聊天不能删除，需要先在 Codex 里处理该任务。删除是普通的本机删除，不能撤销，也不是磁盘安全擦除；云端记录和外部备份不受影响。
 
-```powershell
-npm start
-```
+## 兼容性与安全
 
-如浏览器未能自动打开，在终端运行 `node server.cjs --no-open`，使用终端显示的临时本地链接。该链接包含访问凭证，不要贴进 Issue。参数说明见 `node server.cjs --help`。
+- 支持的数据库结构来自 **2026-10-31** 的兼容性检查。工具会校验每个数据库的表和触发器定义指纹，任何一个不匹配都只允许浏览。
+- 写入前检查 Codex 进程（包括商店版应用、命令行和数据目录内的插件程序），并在执行过程中多次复查。
+- 预览 15 分钟内有效，并绑定数据指纹；预览后数据有任何变化都会要求重新预览。
+- 执行时先把要修改的数据库和文件备份到 `%LOCALAPPDATA%\CodexCleaner\Transactions`，出错自动回滚并校验。成功或回滚成功后删除备份；回滚本身失败时保留故障材料并锁定后续写入，界面会显示具体路径。
+- 拒绝越界路径、符号链接、目录联接和硬链接。
 
-## 兼容性与限制
+内部结构见 [架构与兼容性](docs/architecture.md)。
 
-- 生产使用仅支持 Windows；自动测试使用 Windows 和 Node.js 24。未承诺 macOS、Linux 或 WSL 的进程检测。
-- 当前支持的数据库结构来自 **2026-10-31 的兼容性检查**。相同文件名不代表结构相同；工具校验表及触发器定义的指纹，拒绝未支持的版本。
-- “检查失效引用”无法重建已删除的聊天正文，也不保证修复所有项目或归档错误。
-- 清空记忆不会关闭记忆生成功能；派生聊天、项目导出、语音文件、外部备份等可能另有内容副本。
-- 执行期间使用短暂的内部事务副本。成功或验证回滚成功后删除；断电、强制终止或回滚失败时保留故障材料并锁定后续写入。具体路径会显示在界面。
+## 开发
 
-内部结构和故障处理见 [架构与兼容性](docs/architecture.md)。
-
-## 开发与检查
-
-无需安装第三方依赖，在完整源码目录运行：
+需要 [.NET 10 SDK](https://dotnet.microsoft.com/)。
 
 ```powershell
-npm run check
-npm test
-npm run package
+dotnet test
+dotnet publish src/CodexCleaner -c Release -o dist
 ```
 
-测试在系统临时目录创建虚构数据，不读取或修改真实 `.codex`。请勿把真实数据目录用作测试样本。
-
-打包命令在 `dist/` 生成 Windows 使用包、完整源码包和 `SHA256SUMS.txt`，只收录明确列入发布清单的文件。提交到 GitHub 时，以本目录作为仓库根目录；不要提交父目录的工作文件、日志或真实数据。完整发布步骤见 [发布指南](docs/releasing.md)。
+测试在系统临时目录生成虚构数据，不读取也不修改真实的 `.codex`。发布步骤见 [发布指南](docs/releasing.md)。
 
 ```text
-server.cjs                    本机 HTTP 服务与 Windows 进程检测
-lib/cleaner.cjs                清理计划、数据校验、事务和关联修复
-public/                       原生 HTML / CSS / JavaScript 界面
-test/                         合成数据库与回归测试
-scripts/                      源码检查、白名单打包
-docs/                         架构、界面示例、发布说明
-.github/                      Windows CI 与反馈模板
+src/CodexCleaner.Core/   清理引擎：结构校验、预览计划、事务执行与回滚、进程检测
+src/CodexCleaner/        WinForms 桌面界面
+tests/                   合成数据与回归测试
+docs/                    架构与发布说明
 ```
 
-欢迎提交修复和合成数据回归测试。请先读 [贡献指南](CONTRIBUTING.md)；安全问题见 [安全说明](SECURITY.md)。
+欢迎提交修复和合成数据回归测试，请先读 [贡献指南](CONTRIBUTING.md)；安全问题见 [安全说明](SECURITY.md)。
 
 ## License
 
-项目代码采用 [MIT](LICENSE)。运行环境、兼容性数据与素材来源见 [NOTICE](NOTICE.md)。
+项目代码采用 [MIT](LICENSE)。第三方组件与兼容性数据来源见 [NOTICE](NOTICE.md)。
 
 ## English
 
-CodexCleaner is an independent, local Windows utility for reviewing and deleting recognized Codex chats and memories. It offers explicit previews, file-purpose explanations, and repairs for supported stale local references. It requires Node.js 24+, has no runtime npm dependencies, and refuses writes to unsupported database schemas. It does not erase cloud records or perform forensic disk wiping. Close all writers to the selected data directory before confirming a cleanup.
+CodexCleaner is an independent native Windows utility for reviewing and deleting recognized local Codex chats and memories, with explicit previews and repair of stale local references. It ships as a single self-contained exe, refuses writes to unverified database schemas or while Codex is running, and rolls back automatically on failure. It does not erase cloud records or perform forensic disk wiping.

@@ -1,12 +1,16 @@
-# Generated release archives and temporary local work
+# Build output and temporary local work
+bin/
+obj/
 /dist/
-/coverage/
-/work/
-/outputs/
-/node_modules/
+/TestResults/
 *.log
 *.tmp
 *.zip
+*.user
+.vs/
+.idea/
+.vscode/
+# Never commit real Codex data or transaction material
 *.sqlite*
 *.db
 *.db-*
@@ -18,5 +22,3 @@ Transactions/
 Recovery/
 .DS_Store
 Thumbs.db
-.idea/
-.vscode/
