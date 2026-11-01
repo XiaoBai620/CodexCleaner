@@ -4,7 +4,7 @@
 
 - 改为原生 Windows 桌面程序（C# / WinForms）：单个约 3 MB 的 `CodexCleaner.exe`，运行在 .NET 10 桌面运行时上，不再需要 Node.js，不再启动本地网页服务、占用端口或打开浏览器。
 - 清理引擎用 C# 重写，保留全部安全机制：结构指纹校验、预览数据指纹、跨进程写入锁、事务备份与自动回滚、路径与链接防护、自动化引用保护。
-- 进程检测改为检查程序路径：新增识别商店版 Codex 应用、`codex-command-runner` 和数据目录内的 Codex 组件（如 Chrome 插件 `extension-host.exe`）。旧版只按进程名判断，这些程序运行时会被误判为“已退出”。商店版常驻的沙箱服务不计入。
+- 进程检测改为检查程序路径：新增识别商店版 Codex 应用、`codex-command-runner` 和数据目录内的 Codex 程序。旧版只按进程名判断，这些程序运行时会被误判为“已退出”。商店版常驻的沙箱服务和浏览器插件的通信桥 `extension-host` 不写聊天数据，且会被系统自动重启，不计入。
 - 移除“文件用途”浏览页、命令行参数、启动脚本、网页界面和本地 HTTP 接口；文档集中到 `docs/`。
 - 适配 2026-10-31 检查到的 Codex 数据库结构：`state_5.sqlite`（迁移 62）、`thread_history_1.sqlite`（迁移 8）和 `sqlite/codex-dev.db`。旧指纹导致全部聊天无法识别。
 - 删除聊天时同步删除 `thread_read_receipts`、`guardian_review_feedback` 中的对应记录。

@@ -10,9 +10,11 @@ public static class CodexProcesses
     private static readonly HashSet<string> Names = new(StringComparer.OrdinalIgnoreCase)
         { "codex", "chatgpt", "codex-desktop", "codex-code-mode-host", "codex-app-server", "codex-command-runner" };
 
-    // The Store package's sandbox service starts with Windows as LocalSystem and never exits;
-    // treating it as a writer would block every cleanup.
-    private const string SandboxService = "codex-windows-sandbox-service";
+    // Long-lived helpers that never write chat data: the Store sandbox service starts with Windows,
+    // and extension-host is the browser extension's native-messaging bridge, which the browser
+    // restarts on demand. It only relays to codex.exe (still detected below) and links no SQLite.
+    // Treating either as a writer would block every cleanup.
+    private static readonly HashSet<string> Helpers = new(StringComparer.OrdinalIgnoreCase) { "codex-windows-sandbox-service", "extension-host" };
     private const string StorePackage = @"\WindowsApps\OpenAI.Codex_";
 
     public static ProcessState Detect(string dataRoot)
@@ -26,7 +28,7 @@ public static class CodexProcesses
 
     internal static bool IsCodex(string name, string? path, string dataRoot)
     {
-        if (name.Equals(SandboxService, StringComparison.OrdinalIgnoreCase)) return false;
+        if (Helpers.Contains(name)) return false;
         if (Names.Contains(name) || name.StartsWith("codex-command-runner", StringComparison.OrdinalIgnoreCase)) return true;
         return path is not null && (path.Contains(StorePackage, StringComparison.OrdinalIgnoreCase) || SafePaths.Inside(dataRoot, path));
     }

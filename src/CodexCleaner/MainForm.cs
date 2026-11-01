@@ -12,8 +12,8 @@ internal sealed class MainForm : Form
     private readonly TextBox search = new() { PlaceholderText = "搜索标题或 ID", Width = 280 };
     private readonly ListView list = new() { Dock = DockStyle.Fill, View = View.Details, CheckBoxes = true, FullRowSelect = true, HeaderStyle = ColumnHeaderStyle.Nonclickable, ShowItemToolTips = true };
     private readonly CheckBox selectAll = new() { Text = "全选", AutoSize = true };
-    private readonly CheckBox clearMemories = new() { Text = "同时清空全部本地记忆（合并记忆可能涉及多条聊天）", AutoSize = true };
-    private readonly CheckBox clearShared = new() { Text = "同时清空共享输入历史与日志（影响所有聊天）", AutoSize = true };
+    private readonly CheckBox clearMemories = new() { Text = "同时清空全部本地记忆（合并记忆可能涉及多条聊天）", AutoSize = true, Checked = true };
+    private readonly CheckBox clearShared = new() { Text = "同时清空共享输入历史与日志（影响所有聊天）", AutoSize = true, Checked = true };
     private readonly Label summary = new() { AutoSize = true, Anchor = AnchorStyles.Left, Font = new Font(DefaultFont, FontStyle.Bold) };
     private readonly Button refresh = new() { Text = "刷新", AutoSize = true };
     private readonly Button repair = new() { Text = "检查失效引用", AutoSize = true };
@@ -194,7 +194,6 @@ internal sealed class MainForm : Form
         if (!Confirm(plan)) return;
         var result = await Task.Run(() => cleaner.Execute(plan.Id));
         selected.Clear();
-        clearMemories.Checked = clearShared.Checked = false;
         await Done(result, "所选内容已删除。");
     });
 

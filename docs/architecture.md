@@ -44,7 +44,7 @@
 
 多个 SQLite 文件和普通文件之间没有操作系统级的原子提交。事务副本用于自动回滚可捕获的失败，不能保证断电后无需人工处理。
 
-进程检测按进程名识别 Codex 命令行，按程序路径识别商店版 Codex 包（`WindowsApps\OpenAI.Codex_*`）和数据目录内的 Codex 组件（例如 Chrome 插件的 `extension-host.exe`）。商店版随系统启动的 `codex-windows-sandbox-service` 不会写入聊天数据，不计入。检测和文件指纹无法防御同一账户下恶意程序的并发替换；使用者需要停止所有写入目标目录的程序。
+进程检测按进程名识别 Codex 命令行，按程序路径识别商店版 Codex 包（`WindowsApps\OpenAI.Codex_*`）和数据目录内的 Codex 程序（例如插件用的 `.plugin-appserver\codex.exe`）。两个常驻辅助程序不计入：商店版随系统启动的 `codex-windows-sandbox-service`，以及浏览器插件的原生通信桥 `extension-host`（由浏览器按需重启，只把消息转给 `codex.exe`，本身不链接 SQLite、不写聊天数据库）。真正写数据的 `codex.exe` 仍会被检测到。检测和文件指纹无法防御同一账户下恶意程序的并发替换；使用者需要停止所有写入目标目录的程序。
 
 ## 目录
 
