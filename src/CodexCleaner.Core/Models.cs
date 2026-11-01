@@ -4,11 +4,9 @@ namespace CodexCleaner.Core;
 
 public sealed record ProcessState(bool Running, IReadOnlyList<string> Processes);
 
-public enum BlockReason { None, Database, AutomationInspection, Automation, UnsafePath }
-
-public sealed record ChatInfo(string Id, string Title, DateTimeOffset? UpdatedAt, bool Archived, string? RelativePath, bool RolloutMissing, string Reason, BlockReason Block)
+public sealed record ChatInfo(string Id, string Title, DateTimeOffset? UpdatedAt, bool Archived, string? RelativePath, bool RolloutMissing, string? BlockedReason)
 {
-    public bool CanDelete => Block == BlockReason.None;
+    public bool CanDelete => BlockedReason is null;
 }
 
 public sealed record DatabaseStatus(bool Present, bool Supported, string? Reason = null);

@@ -6,7 +6,7 @@ Windows 桌面小工具：选择本机的 Codex 聊天与记忆，核对预览�
 
 ## 使用
 
-需要 64 位 Windows 10/11。下载 `CodexCleaner.exe` 双击运行即可，不需要安装任何运行环境，也不会占用端口或打开浏览器。
+需要 64 位 Windows 10/11 和 [.NET 10 桌面运行时](https://dotnet.microsoft.com/download/dotnet/10.0)（Windows Desktop Runtime）。下载 `CodexCleaner.exe`（约 3 MB）双击运行；没装运行时的话，Windows 会弹窗提示并给出下载地址。工具不占用端口，也不打开浏览器。
 
 1. 完全退出 Codex 桌面应用、Codex 命令行和 Chrome 插件。窗口顶部会实时显示 Codex 是否仍在运行；运行期间可以浏览和预览，但不能执行。
 2. 勾选要删除的聊天（可按标题或 ID 搜索，已归档的聊天也会列出）。按需要勾选“清空全部本地记忆”“清空共享输入历史与日志”。
@@ -17,7 +17,7 @@ exe 没有代码签名，首次运行时 SmartScreen 可能提示“未知发布
 
 默认读取 `CODEX_HOME`，未设置时读取 `%USERPROFILE%\.codex`。所有处理都在本机完成。
 
-更多说明见 [使用说明](使用说明.md)。
+更多说明见 [使用说明](docs/使用说明.md)，版本变化见 [更新记录](docs/CHANGELOG.md)。
 
 ## 会删除什么
 
@@ -55,15 +55,15 @@ dotnet publish src/CodexCleaner -c Release -o dist
 src/CodexCleaner.Core/   清理引擎：结构校验、预览计划、事务执行与回滚、进程检测
 src/CodexCleaner/        WinForms 桌面界面
 tests/                   合成数据与回归测试
-docs/                    架构与发布说明
+docs/                    使用说明、架构、发布、贡献与安全说明
 ```
 
-欢迎提交修复和合成数据回归测试，请先读 [贡献指南](CONTRIBUTING.md)；安全问题见 [安全说明](SECURITY.md)。
+欢迎提交修复和合成数据回归测试，请先读 [贡献指南](docs/CONTRIBUTING.md)；安全问题见 [安全说明](docs/SECURITY.md)。
 
 ## License
 
-项目代码采用 [MIT](LICENSE)。第三方组件与兼容性数据来源见 [NOTICE](NOTICE.md)。
+项目代码采用 [MIT](LICENSE)。第三方组件与兼容性数据来源见 [NOTICE](docs/NOTICE.md)。
 
 ## English
 
-CodexCleaner is an independent native Windows utility for reviewing and deleting recognized local Codex chats and memories, with explicit previews and repair of stale local references. It ships as a single self-contained exe, refuses writes to unverified database schemas or while Codex is running, and rolls back automatically on failure. It does not erase cloud records or perform forensic disk wiping.
+CodexCleaner is an independent native Windows utility for reviewing and deleting recognized local Codex chats and memories, with explicit previews and repair of stale local references. It ships as a single small exe that requires the .NET 10 Windows Desktop Runtime, refuses writes to unverified database schemas or while Codex is running, and rolls back automatically on failure. It does not erase cloud records or perform forensic disk wiping.

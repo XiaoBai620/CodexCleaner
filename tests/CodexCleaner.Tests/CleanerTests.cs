@@ -169,7 +169,7 @@ public sealed class CleanerTests
         using var f = new Fixture();
         var outside = Fixture.PutAt(f.Base, "outside-rollout.jsonl", "Unrelated outside data");
         using (var db = f.Open("state_5.sqlite")) Fixture.Exec(db, "UPDATE threads SET rollout_path=$p0 WHERE id=$p1", outside, Ids[0]);
-        Assert.Matches("路径|目录外", f.Cleaner.Snapshot().Chats.Single(c => c.Id == Ids[0]).Reason);
+        Assert.Matches("路径|目录外", f.Cleaner.Snapshot().Chats.Single(c => c.Id == Ids[0]).BlockedReason);
         Assert.Throws<CleanerException>(() => Execute(f, Pick(Ids[0])));
         Assert.Equal("Unrelated outside data", File.ReadAllText(outside));
         Assert.Equal(2, ThreadCount(f));
@@ -200,8 +200,8 @@ public sealed class CleanerTests
         }
         var before = f.Rows("sqlite/codex-dev.db", "automations").Count;
         var chat = f.Cleaner.Snapshot().Chats.Single(c => c.Id == Ids[0]);
-        Assert.Equal(BlockReason.Automation, chat.Block);
-        Assert.Contains("Invented schedule", chat.Reason);
+        Assert.Contains("自动化", chat.BlockedReason);
+        Assert.Contains("Invented schedule", chat.BlockedReason);
         Assert.Contains("自动化", Assert.Throws<CleanerException>(() => f.Cleaner.PlanCleanup(Pick(Ids[0]))).Message);
         Assert.Equal(before, f.Rows("sqlite/codex-dev.db", "automations").Count);
         Assert.True(File.Exists(f.RolloutPaths[0]));
@@ -217,7 +217,7 @@ public sealed class CleanerTests
         f.Put(rel, text);
         var state = f.Cleaner.Snapshot();
         Assert.True(state.Chats.Single(c => c.Id == Ids[0]).CanDelete);
-        Assert.Contains("自动化", state.Chats.Single(c => c.Id == Ids[1]).Reason);
+        Assert.Contains("自动化", state.Chats.Single(c => c.Id == Ids[1]).BlockedReason);
         Execute(f, Pick(Ids[0]));
         Assert.Equal(text, File.ReadAllText(f.Data(rel)));
         f.AssertNoTransactions();
@@ -349,7 +349,7 @@ public sealed class CleanerTests
         using var f = new Fixture();
         using (var db = f.Open("state_5.sqlite")) Fixture.Exec(db, "UPDATE threads SET rollout_path=$p0 WHERE id=$p1", @"\\?\" + f.RolloutPaths[0], Ids[0]);
         var chat = f.Cleaner.Snapshot().Chats.Single(c => c.Id == Ids[0]);
-        Assert.True(chat.CanDelete, chat.Reason);
+        Assert.True(chat.CanDelete, chat.BlockedReason);
         Execute(f, Pick(Ids[0]));
         Assert.False(File.Exists(f.RolloutPaths[0]));
         Assert.True(File.Exists(f.RolloutPaths[1]));

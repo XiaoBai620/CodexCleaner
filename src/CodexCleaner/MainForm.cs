@@ -151,12 +151,12 @@ internal sealed class MainForm : Form
         list.Items.Clear();
         foreach (var chat in VisibleChats())
         {
-            var note = !chat.CanDelete ? chat.Reason : chat.RolloutMissing ? "会话文件已缺失，可清除残留索引" : chat.Archived ? "已归档" : "本地记录";
+            var note = chat.BlockedReason ?? (chat.RolloutMissing ? "会话文件已缺失，可清除残留索引" : chat.Archived ? "已归档" : "本地记录");
             var item = new ListViewItem([chat.Title, chat.UpdatedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "—", note])
             {
                 Tag = chat.Id,
                 Checked = selected.Contains(chat.Id),
-                ToolTipText = $"{chat.Title}\n{chat.Id}" + (chat.CanDelete ? "" : "\n" + chat.Reason),
+                ToolTipText = $"{chat.Title}\n{chat.Id}" + (chat.BlockedReason is null ? "" : "\n" + chat.BlockedReason),
                 ForeColor = chat.CanDelete ? SystemColors.WindowText : SystemColors.GrayText,
             };
             list.Items.Add(item);

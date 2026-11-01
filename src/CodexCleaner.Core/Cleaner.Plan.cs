@@ -200,7 +200,7 @@ public sealed partial class Cleaner
         var selected = repair ? [] : ids.Select(id =>
         {
             var chat = snapshot.Chats.FirstOrDefault(c => c.Id == id) ?? throw new CleanerException("选中的聊天已不存在，请刷新。");
-            return chat.CanDelete ? chat : throw new CleanerException(chat.Reason);
+            return chat.BlockedReason is null ? chat : throw new CleanerException(chat.BlockedReason);
         }).ToList();
         var rolloutPaths = selected.Select(c => c.RelativePath).OfType<string>().ToList();
         var rolloutFingerprints = Fingerprints(rolloutPaths);

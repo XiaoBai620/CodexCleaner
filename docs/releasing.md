@@ -12,7 +12,7 @@
    把哈希写入 `dist/SHA256SUMS.txt`，格式为 `<sha256>  CodexCleaner.exe`。
 4. 提交后等待 GitHub 的 Windows CI 通过，再手动创建与版本一致的标签和 Release，上传 `CodexCleaner.exe` 和 `SHA256SUMS.txt`。
 
-`CodexCleaner.exe` 是自包含的单文件程序，内含 .NET 运行时和 SQLite 原生库，用户不需要安装任何依赖。exe 没有代码签名；`SHA256SUMS.txt` 只用于核对下载完整性，不能证明作者身份。
+`CodexCleaner.exe` 是单文件程序，内含本项目代码和 SQLite 原生库，约 3 MB；运行时需要用户安装 .NET 10 桌面运行时（`RollForward=LatestMajor`，之后更高版本的运行时也能运行）。exe 没有代码签名；`SHA256SUMS.txt` 只用于核对下载完整性，不能证明作者身份。
 
 CI（`.github/workflows/ci.yml`）只执行测试和发布构建，并上传构建产物供维护者检查；不会自动公开发布 Release，也不使用任何发布令牌。
 

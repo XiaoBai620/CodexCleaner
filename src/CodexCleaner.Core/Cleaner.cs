@@ -252,10 +252,9 @@ public sealed partial class Cleaner
             foreach (var r in Db.Rows(db, "SELECT id,title,rollout_path,updated_at,updated_at_ms,archived FROM threads ORDER BY updated_at DESC"))
             {
                 var id = (string)r[0]!;
-                var (block, reason) = unsupported.Count > 0 ? (BlockReason.Database, "数据库检查未通过，请查看上方具体原因。")
-                    : automationError is not null ? (BlockReason.AutomationInspection, "自动化定义无法解析，无法安全维护其目标。")
-                    : (BlockReason.None, "");
-                if (targets.TryGetValue(id, out var labels)) (block, reason) = (BlockReason.Automation, $"此聊天是自动化 {string.Join('、', labels)} 的目标，请先在 Codex 中处理该任务。");
+                var reason = unsupported.Count > 0 ? "数据库检查未通过，请查看上方具体原因。"
+                    : automationError is not null ? "自动化定义无法解析，无法安全维护其目标。" : null;
+                if (targets.TryGetValue(id, out var labels)) reason = $"此聊天是自动化 {string.Join('、', labels)} 的目标，请先在 Codex 中处理该任务。";
                 string? relativePath = null;
                 var missing = false;
                 if (r[2] is string { Length: > 0 } rollout)
@@ -267,10 +266,10 @@ public sealed partial class Cleaner
                         if (entry is not null && !IndependentFile(entry)) throw new CleanerException("会话路径不是独立普通文件。");
                         missing = entry is null;
                     }
-                    catch (CleanerException e) { (block, reason) = (BlockReason.UnsafePath, e.Message); }
+                    catch (CleanerException e) { reason = e.Message; }
                 }
                 var updated = r[4] is long ms ? DateTimeOffset.FromUnixTimeMilliseconds(ms) : r[3] is long s ? DateTimeOffset.FromUnixTimeSeconds(s) : (DateTimeOffset?)null;
-                chats.Add(new ChatInfo(id, r[1] as string is { Length: > 0 } title ? title : "未命名聊天", updated, r[5] is long archived && archived != 0, relativePath, missing, reason, block));
+                chats.Add(new ChatInfo(id, r[1] as string is { Length: > 0 } title ? title : "未命名聊天", updated, r[5] is long archived && archived != 0, relativePath, missing, reason));
             }
         }
         if (!statePresent) warnings.Add("未发现受支持的聊天索引 state_5.sqlite；不会猜测或删除孤立会话文件。");

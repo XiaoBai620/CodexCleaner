@@ -1,9 +1,8 @@
 # 来源与名称说明
 
-- CodexCleaner 的项目代码采用 MIT，版权声明见 `LICENSE`。
+- CodexCleaner 的项目代码采用 MIT，版权声明见仓库根目录的 `LICENSE`。
 - 本项目是独立社区工具，不是 OpenAI 官方产品；Codex、ChatGPT、OpenAI 等名称仅用于说明兼容对象，不表示赞助、隶属或商标授权。
-- 发布的 `CodexCleaner.exe` 是自包含程序，内含以下第三方组件，各自按其许可证分发：
-  - .NET 运行时与 Windows Forms（MIT，© .NET Foundation and Contributors）
+- 发布的 `CodexCleaner.exe` 运行在用户另行安装的 .NET 10 桌面运行时（MIT，© .NET Foundation and Contributors）上，并内含以下第三方组件，各自按其许可证分发：
   - Microsoft.Data.Sqlite（MIT，© .NET Foundation and Contributors）
   - SQLitePCLRaw（Apache License 2.0，© Eric Sink / SourceGear）
   - SQLite（公有领域）
