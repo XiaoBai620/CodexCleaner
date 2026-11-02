@@ -10,6 +10,9 @@
     <Version>3.0.0</Version>
     <AssemblyTitle>Codex 本地清理台</AssemblyTitle>
     <Product>CodexCleaner</Product>
+    <Company>XiaoBai620</Company>
+    <Copyright>MIT License</Copyright>
+    <ApplicationIcon>app.ico</ApplicationIcon>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
