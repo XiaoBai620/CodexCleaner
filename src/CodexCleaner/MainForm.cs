@@ -14,7 +14,7 @@ internal sealed class MainForm : Form
     private readonly Cleaner cleaner;
     private readonly HashSet<string> selected = [];
     private readonly Label processTitle = new() { AutoSize = true, Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold), ForeColor = Ink };
-    private readonly Label processDetail = new() { AutoSize = true, Font = new Font("Microsoft YaHei UI", 8.5f), ForeColor = Muted, AutoEllipsis = true };
+    private readonly Label processDetail = new() { AutoSize = false, Dock = DockStyle.Fill, Font = new Font("Microsoft YaHei UI", 8.5f), ForeColor = Muted, AutoEllipsis = true };
     private readonly Label processDot = new() { AutoSize = true, Text = "●", Font = new Font("Segoe UI", 13f, FontStyle.Bold), Margin = new Padding(0, 2, 10, 0) };
     private readonly Panel processBanner = new() { Dock = DockStyle.Fill, Padding = new Padding(12, 8, 12, 8) };
     private readonly Label alerts = new() { AutoSize = true, MaximumSize = new Size(1100, 0), ForeColor = Color.FromArgb(146, 64, 14), BackColor = Color.FromArgb(255, 247, 237), Padding = new Padding(12, 8, 12, 8), Visible = false };
@@ -29,6 +29,7 @@ internal sealed class MainForm : Form
     private readonly Button refresh = new() { Text = "刷新", AutoSize = true };
     private readonly Button repair = new() { Text = "检查失效引用", AutoSize = true };
     private readonly Button preview = new() { Text = "预览清理范围  →", AutoSize = true, Enabled = false };
+    private readonly ToolTip processTip = new();
     private readonly System.Windows.Forms.Timer processTimer = new() { Interval = 3000 };
     private Snapshot? state;
     private bool busy, rendering;
@@ -65,30 +66,27 @@ internal sealed class MainForm : Form
             BackColor = Canvas,
         };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 66));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 66));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 58));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 178));
 
         var masthead = BuildMasthead(version);
-        root.SizeChanged += (_, _) => alerts.MaximumSize = new Size(Math.Max(300, root.ClientSize.Width - root.Padding.Horizontal - 4), 0);
-        var statusStack = new FlowLayoutPanel
+        var statusStack = new TableLayoutPanel
         {
-            Dock = DockStyle.Top,
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 2,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            FlowDirection = FlowDirection.TopDown,
-            WrapContents = false,
             BackColor = Canvas,
             Margin = new Padding(0, 10, 0, 0),
         };
-        statusStack.SizeChanged += (_, _) =>
-        {
-            var width = Math.Max(300, statusStack.ClientSize.Width);
-            processBanner.Width = width;
-            alerts.MaximumSize = new Size(width, 0);
-        };
+        statusStack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        statusStack.RowStyles.Add(new RowStyle(SizeType.Absolute, 56));
+        statusStack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        processBanner.Dock = DockStyle.Fill;
         var processLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = Color.Transparent, Margin = Padding.Empty };
         processLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         processLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -101,9 +99,12 @@ internal sealed class MainForm : Form
         processLayout.Controls.Add(processText, 1, 0);
         processBanner.Controls.Add(processLayout);
         processBanner.Height = 56;
-        statusStack.Controls.Add(processBanner);
+        statusStack.Controls.Add(processBanner, 0, 0);
+        alerts.Dock = DockStyle.Fill;
+        alerts.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+        alerts.MaximumSize = new Size(1500, 0);
         alerts.Margin = new Padding(0, 7, 0, 0);
-        statusStack.Controls.Add(alerts);
+        statusStack.Controls.Add(alerts, 0, 1);
 
         var toolbar = BuildToolbar();
         var listFrame = new Panel { Dock = DockStyle.Fill, BackColor = Surface, Padding = new Padding(1), Margin = new Padding(0, 2, 0, 8), BorderStyle = BorderStyle.FixedSingle };
@@ -161,7 +162,8 @@ internal sealed class MainForm : Form
         var header = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, BackColor = Color.FromArgb(24, 35, 56), Padding = new Padding(14, 9, 14, 8), Margin = Padding.Empty };
         header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 52));
         header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 86));
+        header.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         var brand = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(42, 65, 101), Margin = new Padding(0, 0, 12, 0) };
         var glyph = new Label { Dock = DockStyle.Fill, Text = "C", TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 17f, FontStyle.Bold), ForeColor = Color.White };
         brand.Controls.Add(glyph);
@@ -170,9 +172,9 @@ internal sealed class MainForm : Form
         text.Controls.Add(new Label { Text = "筛选本机聊天 · 预览范围 · 确认后执行", AutoSize = true, Location = new Point(1, 32), Font = new Font("Microsoft YaHei UI", 8.5f), ForeColor = Color.FromArgb(183, 196, 216) });
         var badge = new Label
         {
-            Text = $"v{version.Major}.{version.Minor}.{version.Build}", AutoSize = true, TextAlign = ContentAlignment.MiddleCenter,
-            Anchor = AnchorStyles.Right, ForeColor = Color.FromArgb(217, 226, 241), BackColor = Color.FromArgb(42, 55, 78),
-            Padding = new Padding(10, 5, 10, 5), Margin = new Padding(0, 8, 0, 0), Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+            Text = $"v{version.Major}.{version.Minor}.{version.Build}", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter,
+            ForeColor = Color.FromArgb(217, 226, 241), BackColor = Color.FromArgb(42, 55, 78),
+            Padding = new Padding(7, 2, 7, 2), Margin = new Padding(0, 2, 0, 2), Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
         };
         header.Controls.Add(brand, 0, 0);
         header.Controls.Add(text, 1, 0);
@@ -322,7 +324,8 @@ internal sealed class MainForm : Form
         processTitle.Text = ready ? "Codex 已退出，可以执行清理" : "Codex 正在运行";
         processDetail.Text = ready
             ? $"数据目录：{cleaner.DataRoot}"
-            : $"{string.Join("、", process.Processes)} · 退出后才能执行；现在可以浏览和预览。";
+            : "检测到 Codex 相关进程 · 退出后才能执行；现在可以浏览和预览。";
+        processTip.SetToolTip(processBanner, ready ? cleaner.DataRoot : string.Join(Environment.NewLine, process.Processes));
     }
 
     private void RenderChats()

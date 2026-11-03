@@ -17,8 +17,8 @@ internal sealed class ConfirmDialog : Form
     {
         this.processState = processState;
         Text = plan.Repair ? "修复失效引用" : "确认清理范围";
-        Size = new Size(760, 560);
-        MinimumSize = new Size(560, 420);
+        Size = new Size(760, 500);
+        MinimumSize = new Size(560, 380);
         BackColor = Color.FromArgb(246, 248, 251);
         ForeColor = Ink;
         Font = new Font("Microsoft YaHei UI", 9f);
@@ -26,7 +26,7 @@ internal sealed class ConfirmDialog : Form
         MinimizeBox = MaximizeBox = false;
         ShowInTaskbar = false;
 
-        var tree = new TreeView { Dock = DockStyle.Fill, ShowNodeToolTips = true, BackColor = Color.White, ForeColor = Ink, BorderStyle = BorderStyle.None, FullRowSelect = true, ItemHeight = 22, Font = new Font("Microsoft YaHei UI", 9f) };
+        var tree = new TreeView { Dock = DockStyle.Fill, ShowNodeToolTips = true, BackColor = Color.White, ForeColor = Ink, BorderStyle = BorderStyle.None, FullRowSelect = true, ItemHeight = 21, Font = new Font("Microsoft YaHei UI", 9f), Padding = new Padding(8, 5, 8, 5) };
         TreeNode Section(string title, IEnumerable<string> items, bool expand)
         {
             var node = new TreeNode($"{title} · {items.Count()}");
