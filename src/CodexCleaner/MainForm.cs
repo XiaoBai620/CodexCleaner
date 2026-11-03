@@ -40,8 +40,8 @@ internal sealed class MainForm : Form
         var version = Assembly.GetExecutingAssembly().GetName().Version!;
         Text = $"Codex 本地清理台 {version.Major}.{version.Minor}.{version.Build}";
         Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!);
-        MinimumSize = new Size(820, 560);
-        Size = new Size(1080, 760);
+        MinimumSize = new Size(820, 520);
+        Size = new Size(1080, 700);
         BackColor = Canvas;
         ForeColor = Ink;
         Font = new Font("Microsoft YaHei UI", 9f);
@@ -62,15 +62,15 @@ internal sealed class MainForm : Form
             Dock = DockStyle.Fill,
             ColumnCount = 1,
             RowCount = 5,
-            Padding = new Padding(18, 14, 18, 14),
+            Padding = new Padding(18, 12, 18, 12),
             BackColor = Canvas,
         };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 58));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 66));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 58));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 178));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 160));
 
         var masthead = BuildMasthead(version);
         var statusStack = new TableLayoutPanel
@@ -159,22 +159,22 @@ internal sealed class MainForm : Form
 
     private static Panel BuildMasthead(Version version)
     {
-        var header = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, BackColor = Color.FromArgb(24, 35, 56), Padding = new Padding(14, 9, 14, 8), Margin = Padding.Empty };
-        header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 52));
+        var header = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, BackColor = Surface, Padding = new Padding(2, 5, 2, 5), Margin = Padding.Empty };
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 44));
         header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 86));
         header.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        var brand = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(42, 65, 101), Margin = new Padding(0, 0, 12, 0) };
-        var glyph = new Label { Dock = DockStyle.Fill, Text = "C", TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 17f, FontStyle.Bold), ForeColor = Color.White };
+        var brand = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(231, 239, 255), Margin = new Padding(0, 0, 10, 0) };
+        var glyph = new Label { Dock = DockStyle.Fill, Text = "C", TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 15f, FontStyle.Bold), ForeColor = Accent };
         brand.Controls.Add(glyph);
         var text = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent };
-        text.Controls.Add(new Label { Text = "Codex 本地清理台", AutoSize = true, Location = new Point(0, 0), Font = new Font("Microsoft YaHei UI", 13f, FontStyle.Bold), ForeColor = Color.White });
-        text.Controls.Add(new Label { Text = "筛选本机聊天 · 预览范围 · 确认后执行", AutoSize = true, Location = new Point(1, 32), Font = new Font("Microsoft YaHei UI", 8.5f), ForeColor = Color.FromArgb(183, 196, 216) });
+        text.Controls.Add(new Label { Text = "Codex 本地清理台", AutoSize = true, Location = new Point(0, 0), Font = new Font("Microsoft YaHei UI", 11.5f, FontStyle.Bold), ForeColor = Ink });
+        text.Controls.Add(new Label { Text = "筛选聊天，核对范围后再执行", AutoSize = true, Location = new Point(1, 24), Font = new Font("Microsoft YaHei UI", 8f), ForeColor = Muted });
         var badge = new Label
         {
             Text = $"v{version.Major}.{version.Minor}.{version.Build}", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter,
-            ForeColor = Color.FromArgb(217, 226, 241), BackColor = Color.FromArgb(42, 55, 78),
-            Padding = new Padding(7, 2, 7, 2), Margin = new Padding(0, 2, 0, 2), Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+            ForeColor = Muted, BackColor = Color.FromArgb(242, 244, 247),
+            Padding = new Padding(7, 2, 7, 2), Margin = new Padding(0, 2, 0, 2), Font = new Font("Segoe UI", 8f, FontStyle.Bold),
         };
         header.Controls.Add(brand, 0, 0);
         header.Controls.Add(text, 1, 0);
@@ -184,30 +184,35 @@ internal sealed class MainForm : Form
 
     private Control BuildToolbar()
     {
-        var toolbar = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = Canvas, Padding = new Padding(0, 10, 0, 5), Margin = Padding.Empty };
+        var toolbar = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, BackColor = Canvas, Padding = new Padding(0, 5, 0, 7), Margin = Padding.Empty };
+        toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
         var searchPanel = new Panel { Dock = DockStyle.Fill, BackColor = Canvas, Margin = Padding.Empty };
-        search.Width = 310;
-        search.Location = new Point(0, 6);
-        search.Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right;
+        search.Dock = DockStyle.Fill;
+        search.Margin = new Padding(0, 0, 8, 0);
         searchPanel.Controls.Add(search);
-        var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = false, FlowDirection = FlowDirection.LeftToRight, BackColor = Canvas, Margin = Padding.Empty, Padding = new Padding(0, 5, 0, 0) };
+        var heading = new Panel { Dock = DockStyle.Fill, Width = 208, BackColor = Canvas, Margin = new Padding(0, 0, 10, 0) };
+        heading.Controls.Add(new Label { Text = "本地聊天", AutoSize = true, Location = new Point(0, 0), Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold), ForeColor = Ink });
+        heading.Controls.Add(new Label { Text = "选择需要清理的会话", AutoSize = true, Location = new Point(1, 23), Font = new Font("Microsoft YaHei UI", 8f), ForeColor = Muted });
+        var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = false, FlowDirection = FlowDirection.LeftToRight, BackColor = Canvas, Margin = Padding.Empty, Padding = new Padding(0, 1, 0, 0) };
         actions.Controls.Add(selectAll);
         actions.Controls.Add(refresh);
         actions.Controls.Add(repair);
-        toolbar.Controls.Add(searchPanel, 0, 0);
-        toolbar.Controls.Add(actions, 1, 0);
+        toolbar.Controls.Add(heading, 0, 0);
+        toolbar.Controls.Add(searchPanel, 1, 0);
+        toolbar.Controls.Add(actions, 2, 0);
         return toolbar;
     }
 
     private Control BuildBottomPanel()
     {
-        var bottom = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, BackColor = Canvas, Padding = new Padding(0, 4, 0, 0), Margin = Padding.Empty };
-        bottom.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+        var bottom = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, BackColor = Canvas, Padding = new Padding(0, 4, 0, 0), Margin = Padding.Empty };
+        bottom.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
+        bottom.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
         bottom.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        bottom.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
+        bottom.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
 
         var summaryBar = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = Canvas, Margin = Padding.Empty };
         summaryBar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -239,8 +244,9 @@ internal sealed class MainForm : Form
         footer.Controls.Add(preview, 1, 0);
 
         bottom.Controls.Add(summaryBar, 0, 0);
-        bottom.Controls.Add(optionsCard, 0, 1);
-        bottom.Controls.Add(footer, 0, 2);
+        bottom.Controls.Add(new Label { Text = "附加清理范围", AutoSize = true, Anchor = AnchorStyles.Left, Font = new Font("Microsoft YaHei UI", 8.5f, FontStyle.Bold), ForeColor = Muted, Margin = Padding.Empty }, 0, 1);
+        bottom.Controls.Add(optionsCard, 0, 2);
+        bottom.Controls.Add(footer, 0, 3);
         return bottom;
     }
 
