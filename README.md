@@ -4,14 +4,14 @@ Windows 桌面小工具：选择本机的 Codex 聊天与记忆，核对预览�
 
 **独立社区项目，与 OpenAI 无官方隶属关系。** 只支持已验证的本机存储结构；Codex 数据格式变化时会停止清理，等待工具适配。
 
-![使用虚构聊天数据的界面](docs/screenshot.png)
+![使用虚构聊天数据的界面（当前稳定版截图）](docs/screenshot.png)
 
 ## 使用
 
 需要 64 位 Windows 10/11 和 [.NET 10 桌面运行时](https://dotnet.microsoft.com/download/dotnet/10.0)（Windows Desktop Runtime）。从 [Releases](https://github.com/XiaoBai620/CodexCleaner/releases/latest) 下载 `CodexCleaner.exe`（约 3 MB）双击运行；没装运行时的话，Windows 会弹窗提示并给出下载地址。工具不占用端口，也不打开浏览器。
 
 1. 完全退出 Codex 桌面应用和 Codex 命令行。窗口顶部会实时显示 Codex 是否仍在运行；运行期间可以浏览和预览，但不能执行。浏览器插件的 `extension-host` 不需要结束。
-2. 勾选要删除的聊天（可按标题或 ID 搜索，已归档的聊天也会列出）。“清空全部本地记忆”“清空共享输入历史与日志”默认勾选，不需要时取消。
+2. 勾选要删除的聊天（可按标题或 ID 搜索，已归档的聊天也会列出）；“全选本页”可直接选择当前搜索结果中的全部可删除聊天，再点一次可取消。“清空全部本地记忆”“清空共享输入历史与日志”默认勾选，不需要时取消。
 3. 点击“预览清理范围”，核对聊天、数据库记录和文件，点击“确认删除”。
 4. 之前删除后在 Codex 里遇到项目或归档错误时，点击“检查失效引用”，核对后“确认修复”。
 
