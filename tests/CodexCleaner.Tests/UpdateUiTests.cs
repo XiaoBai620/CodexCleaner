@@ -140,7 +140,8 @@ public sealed class UpdateUiTests
         }) { IsBackground = true };
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
-        Assert.True(thread.Join(TimeSpan.FromSeconds(30)), "The isolated UI test did not finish.");
+        // Include the synthetic SQLite setup/cleanup budget on hosted Windows runners.
+        Assert.True(thread.Join(TimeSpan.FromSeconds(120)), "The isolated UI test did not finish within two minutes.");
         failure?.Throw();
     }
 

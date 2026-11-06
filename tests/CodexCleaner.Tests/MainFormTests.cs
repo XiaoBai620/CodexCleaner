@@ -254,7 +254,9 @@ public sealed class MainFormTests
         }) { IsBackground = true };
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
-        Assert.True(thread.Join(TimeSpan.FromSeconds(20)), "The isolated UI test did not finish.");
+        // This also includes creating and inspecting the synthetic SQLite files.
+        // Hosted Windows runners need more time than a local desktop under parallel I/O.
+        Assert.True(thread.Join(TimeSpan.FromSeconds(120)), "The isolated UI test did not finish within two minutes.");
         failure?.Throw();
     }
 }
