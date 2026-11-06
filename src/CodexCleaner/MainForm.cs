@@ -244,7 +244,7 @@ internal sealed class MainForm : Form
             checkUpdates.Text = update is null && manual ? "已是最新版本" : "检查更新";
             tip.SetToolTip(checkUpdates, update is null ? "当前已是最新正式版。点击可重新检查。" : "发现新版本，点击「前往更新」查看发布说明和下载。");
         }
-        catch (Exception error) when (error is HttpRequestException or IOException or JsonException or OperationCanceledException)
+        catch (Exception error) when (error is HttpRequestException or IOException or InvalidDataException or JsonException or OperationCanceledException)
         {
             if (IsDisposed || updateCancellation.IsCancellationRequested) return;
             checkUpdates.Text = manual ? "检查失败，重试" : "检查更新";

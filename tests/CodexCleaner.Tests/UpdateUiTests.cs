@@ -54,11 +54,14 @@ public sealed class UpdateUiTests
         form.Close();
     });
 
-    [Fact]
-    public void FailedCheckAllowsRetryAndDoesNotDisableLocalControls() => OnSta(() =>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void FailedCheckAllowsRetryAndDoesNotDisableLocalControls(bool invalidResponse) => OnSta(() =>
     {
         using var fixture = new Fixture();
-        var checker = new StubChecker(_ => Task.FromException<AvailableUpdate?>(new HttpRequestException("Offline")));
+        var checker = new StubChecker(_ => Task.FromException<AvailableUpdate?>(invalidResponse
+            ? new InvalidDataException("Malformed release metadata") : new HttpRequestException("Offline")));
         using var form = Create(fixture, checker);
         form.Show();
         PumpUntil(() => checker.Calls == 1 && Field<Button>(form, "refresh").Enabled);
