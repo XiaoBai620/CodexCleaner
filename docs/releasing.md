@@ -3,18 +3,20 @@
 发布由 GitHub Actions 完成：推送 `v<版本>` 标签后，CI 运行测试、构建 exe、生成 `SHA256SUMS.txt`，并用 `CHANGELOG.md` 中对应版本的内容创建 Release。
 
 1. 更新 `src/CodexCleaner/CodexCleaner.csproj` 中的 `<Version>`，并在 `docs/CHANGELOG.md` 顶部新增 `## <版本>` 一节。
-2. 本地运行 `dotnet test tests/CodexCleaner.Tests`，并用虚构数据或测试用的 `CODEX_HOME` 手动检查一遍界面：列表、搜索、全选、预览、确认、检查失效引用，以及 Codex 运行时确认按钮不可用。
+2. 本地运行 `dotnet test tests/CodexCleaner.Tests`，并用虚构数据或测试用的 `CODEX_HOME` 手动检查一遍界面：列表、搜索、全选、预览、确认、检查失效引用，以及 Codex 运行时确认按钮不可用。更新提示应覆盖新版、无新版和网络失败；检查失败不能阻止本地操作。
 3. 提交并推送到 `main`，等 CI 通过。
 4. 打标签并推送：
 
-   ```powershell
-   git tag -a v3.0.0 -m "CodexCleaner 3.0.0"
-   git push origin v3.0.0
+   ```text
+   git tag -a v3.2.0 -m "CodexCleaner 3.2.0"
+   git push origin v3.2.0
    ```
 
    标签必须与 `<Version>` 一致，否则 CI 会失败；`CHANGELOG.md` 中缺少对应版本一节时也会失败，不会创建 Release。
 
 本地构建 exe：`dotnet publish src/CodexCleaner -c Release -o dist`。
+
+发布辅助操作使用 Python 3.11 或更高版本：`python scripts/release.py package` 校验项目版本及对应更新记录，并生成 `dist/SHA256SUMS.txt`；`python scripts/release.py verify --tag v3.2.0` 额外校验标签一致；`python scripts/release.py notes --tag v3.2.0` 将该版本的更新记录写入 `notes.md`。`notes.md` 是发布暂存文件，使用后删除。CI 仅上传 `CodexCleaner.exe` 和 `SHA256SUMS.txt`。
 
 `CodexCleaner.exe` 是单文件程序，内含本项目代码和 SQLite 原生库，约 3 MB；运行时需要用户安装 .NET 10 桌面运行时（`RollForward=LatestMajor`，之后更高版本的运行时也能运行）。exe 没有代码签名；`SHA256SUMS.txt` 只用于核对下载完整性，不能证明作者身份。
 

@@ -29,19 +29,17 @@ jobs:
         run: dotnet publish src/CodexCleaner -c Release -o dist
       - name: Check tag matches project version
         if: startsWith(github.ref, 'refs/tags/v')
-        shell: pwsh
-        run: |
-          $version = ([xml](Get-Content src/CodexCleaner/CodexCleaner.csproj -Raw -Encoding utf8)).Project.PropertyGroup.Version
-          if ("v$version" -ne '${{ github.ref_name }}') { throw "Tag ${{ github.ref_name }} does not match project version $version" }
+        env:
+          TAG: ${{ github.ref_name }}
+        run: python scripts/release.py verify
       - name: Write checksum
-        shell: pwsh
-        run: |
-          $hash = (Get-FileHash dist/CodexCleaner.exe -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  CodexCleaner.exe" | Set-Content -NoNewline -Encoding ascii dist/SHA256SUMS.txt
+        run: python scripts/release.py package
       - uses: actions/upload-artifact@v7
         with:
           name: CodexCleaner-${{ github.sha }}
-          path: dist/*
+          path: |
+            dist/CodexCleaner.exe
+            dist/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 7
 
@@ -62,7 +60,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          version="${TAG#v}"
-          awk -v v="## $version" '$0==v{f=1;next} /^## /{f=0} f' docs/CHANGELOG.md > notes.md
-          test -s notes.md
+          python scripts/release.py notes
           gh release create "$TAG" dist/CodexCleaner.exe dist/SHA256SUMS.txt --title "CodexCleaner $TAG" --notes-file notes.md --verify-tag

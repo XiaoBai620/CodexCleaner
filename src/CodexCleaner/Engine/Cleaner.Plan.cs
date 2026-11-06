@@ -147,6 +147,38 @@ public sealed partial class Cleaner
         return result.Order(StringComparer.Ordinal).ToList();
     }
 
+    private void AssertRecordOnlyPathsPreserved(IEnumerable<ChatInfo> chats, IEnumerable<FileWork> files, IEnumerable<DatabaseWork> databases, Selection selection)
+    {
+        var retained = chats.Where(c => c.CanRemoveRecord && !string.IsNullOrWhiteSpace(c.OriginalPath)).ToList();
+        if (retained.Count == 0) return;
+        // Compare names only: an unverified rollout path must never be opened to
+        // resolve aliases. Include SQLite sidecars because a database write may
+        // create, rewrite, checkpoint or remove them.
+        var mutations = files.Select(f => f.Path)
+            .Concat(databases.SelectMany(d => new[] { "", "-wal", "-shm", "-journal" }.Select(suffix => d.Path + suffix)))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(rel => SafePaths.Normal(Path.Combine(DataRoot, rel)), rel => rel, StringComparer.OrdinalIgnoreCase);
+        foreach (var chat in retained)
+        {
+            string original;
+            try
+            {
+                original = SafePaths.Normal(Path.IsPathRooted(chat.OriginalPath!)
+                    ? chat.OriginalPath! : Path.Combine(DataRoot, chat.OriginalPath!));
+            }
+            catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                // An invalid name cannot equal any validated mutation target.
+                continue;
+            }
+            if (!mutations.TryGetValue(original, out var relative)) continue;
+            var nextStep = selection.ClearMemories || selection.ClearSharedHistory
+                ? "请取消相关附加清理，或先在 Codex 中处理该会话路径后重新预览。"
+                : "请先在 Codex 中处理该会话路径后重新预览。";
+            throw new CleanerException($"聊天 {chat.Id} 的原路径与本次清理范围重合：{relative}。无法同时保证原会话文件保留；{nextStep}");
+        }
+    }
+
     public Plan PlanCleanup(Selection selection) => WithRead(() => BuildPlan(selection, repair: false));
 
     public Plan PlanRepair() => WithRead(() =>
@@ -200,7 +232,8 @@ public sealed partial class Cleaner
         var selected = repair ? [] : ids.Select(id =>
         {
             var chat = snapshot.Chats.FirstOrDefault(c => c.Id == id) ?? throw new CleanerException("选中的聊天已不存在，请刷新。");
-            return chat.BlockedReason is null ? chat : throw new CleanerException(chat.BlockedReason);
+            return chat.CanDelete || (selection.AllowRecordOnly && chat.CanRemoveRecord)
+                ? chat : throw new CleanerException(chat.BlockedReason!);
         }).ToList();
         var rolloutPaths = selected.Select(c => c.RelativePath).OfType<string>().ToList();
         var rolloutFingerprints = Fingerprints(rolloutPaths);
@@ -223,6 +256,7 @@ public sealed partial class Cleaner
             // Queue delete triggers can recreate revision rows; keep zero-count actions.
             if (actions.Any(a => a.Count > 0)) databases.Add(new DatabaseWork(rel, actions));
         }
+        AssertRecordOnlyPathsPreserved(selected, files.Values, databases, selection);
         var automationFiles = AutomationFiles();
         if (!automationFiles.SequenceEqual(baseline.AutomationFiles)) throw new CleanerException("自动化文件列表在生成预览时改变，请重新预览。");
         // Even preserved DBs can gain new messages or automations between preview and execution.
@@ -242,6 +276,9 @@ public sealed partial class Cleaner
                 "这是本机逻辑删除，不保证从 SSD、系统还原点或外部备份中不可恢复。",
             };
         if (!repair && !selection.ClearSharedHistory) warnings.Add("共享输入历史和无法归属聊天的数据库日志仍保留；可勾选共享历史清理。");
+        var recordOnly = selected.Where(c => c.CanRemoveRecord).ToList();
+        if (recordOnly.Count > 0)
+            warnings.Insert(0, $"其中 {recordOnly.Count} 条聊天仅清理本地数据库记录及已识别的关联引用；原会话文件路径未验证，不会据此查找或删除文件。若原文件以后被 Codex 再次导入，这些聊天可能重新出现。");
         var planId = Guid.NewGuid().ToString();
         var publicPlan = new Plan(planId, repair, DateTimeOffset.Now + Catalog.PlanLifetime, selection, selected,
             files.Values.Sum(f => f.References),

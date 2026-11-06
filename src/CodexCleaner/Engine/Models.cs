@@ -7,6 +7,9 @@ public sealed record ProcessState(bool Running, IReadOnlyList<string> Processes)
 public sealed record ChatInfo(string Id, string Title, DateTimeOffset? UpdatedAt, bool Archived, string? RelativePath, bool RolloutMissing, string? BlockedReason)
 {
     public bool CanDelete => BlockedReason is null;
+    // Display-only metadata. Never use this value as an I/O target.
+    public string? OriginalPath { get; init; }
+    public bool CanRemoveRecord { get; init; }
 }
 
 public sealed record DatabaseStatus(bool Present, bool Supported, string? Reason = null);
@@ -22,7 +25,11 @@ public sealed record Snapshot(
     internal Dictionary<string, List<string>> AutomationTargets { get; init; } = [];
 }
 
-public sealed record Selection(IReadOnlyList<string> ChatIds, bool ClearMemories = false, bool ClearSharedHistory = false);
+public sealed record Selection(IReadOnlyList<string> ChatIds, bool ClearMemories = false, bool ClearSharedHistory = false)
+{
+    // The caller must explicitly include record-only cleanup in its reviewed scope.
+    public bool AllowRecordOnly { get; init; }
+}
 
 public sealed record PlanTable(string Name, long Rows, bool ClearsReference);
 

@@ -257,19 +257,54 @@ public sealed partial class Cleaner
                 if (targets.TryGetValue(id, out var labels)) reason = $"此聊天是自动化 {string.Join('、', labels)} 的目标，请先在 Codex 中处理该任务。";
                 string? relativePath = null;
                 var missing = false;
-                if (r[2] is string { Length: > 0 } rollout)
+                var canRemoveRecord = false;
+                var originalPath = r[2] as string;
+                if (!string.IsNullOrWhiteSpace(originalPath) && IsSpecialRolloutPath(originalPath))
+                {
+                    // Device namespaces and alternate streams can alias known cleanup
+                    // targets. Keep them blocked without resolving or opening the path.
+                    reason ??= "会话路径包含设备路径或数据流，不能安全验证；暂不支持清理这条记录。";
+                }
+                else if (!string.IsNullOrWhiteSpace(originalPath))
                 {
                     try
                     {
-                        relativePath = RolloutRelative(rollout);
-                        var entry = Stat(relativePath);
-                        if (entry is not null && !IndependentFile(entry)) throw new CleanerException("会话路径不是独立普通文件。");
-                        missing = entry is null;
+                        // Classify the stored path without opening it. Unsupported paths may
+                        // still have local database rows that the user explicitly removes.
+                        relativePath = RolloutRelative(originalPath);
                     }
-                    catch (CleanerException e) { reason = e.Message; }
+                    catch (Exception e) when (e is CleanerException or ArgumentException or NotSupportedException or PathTooLongException)
+                    {
+                        if (reason is null)
+                        {
+                            reason = (e is CleanerException ? e.Message : "会话路径格式无法识别。") + " 可仅清理本地记录，原会话文件保留。";
+                            canRemoveRecord = true;
+                        }
+                    }
+                    if (relativePath is not null)
+                    {
+                        try
+                        {
+                            var entry = Stat(relativePath);
+                            if (entry is not null && !IndependentFile(entry)) throw new CleanerException("会话路径不是独立普通文件。");
+                            missing = entry is null;
+                        }
+                        // Links and other unsafe objects inside a recognized directory
+                        // remain blocked; record-only cleanup must not bypass this guard.
+                        catch (CleanerException e) { reason ??= e.Message; }
+                    }
+                }
+                else if (reason is null)
+                {
+                    reason = "未记录会话文件路径。可仅清理本地记录，不会查找或删除原会话文件。";
+                    canRemoveRecord = true;
                 }
                 var updated = r[4] is long ms ? DateTimeOffset.FromUnixTimeMilliseconds(ms) : r[3] is long s ? DateTimeOffset.FromUnixTimeSeconds(s) : (DateTimeOffset?)null;
-                chats.Add(new ChatInfo(id, r[1] as string is { Length: > 0 } title ? title : "未命名聊天", updated, r[5] is long archived && archived != 0, relativePath, missing, reason));
+                chats.Add(new ChatInfo(id, r[1] as string is { Length: > 0 } title ? title : "未命名聊天", updated, r[5] is long archived && archived != 0, relativePath, missing, reason)
+                {
+                    OriginalPath = originalPath,
+                    CanRemoveRecord = canRemoveRecord,
+                });
             }
         }
         if (!statePresent) warnings.Add("未发现受支持的聊天索引 state_5.sqlite；不会猜测或删除孤立会话文件。");
@@ -279,13 +314,38 @@ public sealed partial class Cleaner
         { AutomationTargets = targets };
     }
 
-    [GeneratedRegex(@"^(sessions|archived_sessions)/.+\.jsonl\z")]
+    private static bool IsSpecialRolloutPath(string value)
+    {
+        var path = value.Replace('/', '\\');
+        if (path.StartsWith(@"\\.\", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith(@"\??\", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith(@"\\??\", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith(@"\Device\", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith(@"\DosDevices\", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith(@"\GLOBAL??\", StringComparison.OrdinalIgnoreCase)) return true;
+
+        if (path.StartsWith(@"\\?\", StringComparison.Ordinal))
+        {
+            var unprefixed = path[4..];
+            if (unprefixed.StartsWith(@"UNC\", StringComparison.OrdinalIgnoreCase))
+                path = @"\\" + unprefixed[4..];
+            else if (unprefixed.Length >= 3 && char.IsAsciiLetter(unprefixed[0]) && unprefixed[1] == ':' && unprefixed[2] == '\\')
+                path = unprefixed;
+            else return true;
+        }
+
+        // The first colon may identify a drive. Any later colon names a stream.
+        var start = path.Length >= 2 && char.IsAsciiLetter(path[0]) && path[1] == ':' ? 2 : 0;
+        return path.IndexOf(':', start) >= 0;
+    }
+
+    [GeneratedRegex(@"^(sessions|archived_sessions)/.+\.jsonl\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex RolloutPath();
 
     private string RolloutRelative(string value)
     {
         var full = SafePaths.Normal(Path.IsPathRooted(value) ? value : Path.Combine(DataRoot, value));
-        if (!SafePaths.Inside(DataRoot, full)) throw new CleanerException("聊天会话路径在数据目录外，禁止清理。");
+        if (!SafePaths.Inside(DataRoot, full)) throw new CleanerException("聊天会话路径在数据目录外，无法安全删除会话文件。");
         var rel = SafePaths.ValidRelative(Path.GetRelativePath(DataRoot, full).Replace('\\', '/'));
         if (!RolloutPath().IsMatch(rel)) throw new CleanerException("会话文件不在已验证的 sessions / archived_sessions 目录。");
         return rel;

@@ -1,422 +1,812 @@
-using System.Reflection;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Net.Http;
+using System.Runtime.InteropServices;
+using System.Text.Json;
 using CodexCleaner.Engine;
 
 namespace CodexCleaner;
 
 internal sealed class MainForm : Form
 {
-    private static readonly Color Ink = Color.FromArgb(31, 41, 55);
-    private static readonly Color Muted = Color.FromArgb(107, 114, 128);
-    private static readonly Color Accent = Color.FromArgb(37, 99, 235);
-    private static readonly Color Surface = Color.White;
-    private static readonly Color Canvas = Color.FromArgb(246, 248, 251);
-
     private readonly Cleaner cleaner;
+    private readonly IUpdateChecker updateChecker;
+    private readonly Action<Uri> openReleasePage;
+    private readonly CancellationTokenSource updateCancellation = new();
+    private readonly Button checkUpdates = DesktopTheme.Button("检查更新");
+    private readonly Button downloadUpdate = DesktopTheme.Button("前往更新", primary: true);
+    private readonly Label updateNotice = DesktopTheme.Label("", 9.5f, true);
+    private readonly Panel updateBanner = new() { Dock = DockStyle.Fill, Padding = new Padding(14, 6, 14, 6), Margin = new Padding(0, 8, 0, 0), BackColor = Color.FromArgb(230, 239, 255), Visible = false };
+    private readonly RowStyle updateRowStyle = new(SizeType.Absolute, 0);
+    private AvailableUpdate? availableUpdate;
+    private bool checkingUpdate;
     private readonly HashSet<string> selected = [];
-    private readonly Label processTitle = new() { AutoSize = true, Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold), ForeColor = Ink };
-    private readonly Label processDetail = new() { AutoSize = false, Dock = DockStyle.Fill, Font = new Font("Microsoft YaHei UI", 8.5f), ForeColor = Muted, AutoEllipsis = true };
-    private readonly Label processDot = new() { AutoSize = true, Text = "●", Font = new Font("Segoe UI", 13f, FontStyle.Bold), Margin = new Padding(0, 2, 10, 0) };
-    private readonly Panel processBanner = new() { Dock = DockStyle.Fill, Padding = new Padding(12, 8, 12, 8) };
-    private readonly Label alerts = new() { AutoSize = true, MaximumSize = new Size(1100, 0), ForeColor = Color.FromArgb(146, 64, 14), BackColor = Color.FromArgb(255, 247, 237), Padding = new Padding(12, 8, 12, 8), Visible = false };
-    private readonly TextBox search = new() { PlaceholderText = "搜索聊天标题或 ID", Width = 300, BorderStyle = BorderStyle.FixedSingle, Font = new Font("Microsoft YaHei UI", 9f) };
-    private readonly ListView list = new() { Dock = DockStyle.Fill, View = View.Details, CheckBoxes = true, FullRowSelect = true, HeaderStyle = ColumnHeaderStyle.Nonclickable, ShowItemToolTips = true, BorderStyle = BorderStyle.None, BackColor = Surface, ForeColor = Ink, HideSelection = false };
-    private readonly Label emptyState = new() { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Microsoft YaHei UI", 10f), ForeColor = Muted, Visible = false };
-    private readonly Button selectAll = new() { Text = "全选本页", AutoSize = true };
-    private readonly CheckBox clearMemories = new() { Text = "同时清空全部本地记忆", AutoSize = true, Checked = true, Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold), ForeColor = Ink };
-    private readonly CheckBox clearShared = new() { Text = "同时清空共享输入历史与日志", AutoSize = true, Checked = true, Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold), ForeColor = Ink };
-    private readonly Label summary = new() { AutoSize = true, Anchor = AnchorStyles.Left, Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold), ForeColor = Ink };
-    private readonly Label selectionCount = new() { AutoSize = true, Anchor = AnchorStyles.Right, Font = new Font("Microsoft YaHei UI", 8.5f), ForeColor = Muted };
-    private readonly Button refresh = new() { Text = "刷新", AutoSize = true };
-    private readonly Button repair = new() { Text = "检查失效引用", AutoSize = true };
-    private readonly Button preview = new() { Text = "预览清理范围  →", AutoSize = true, Enabled = false };
-    private readonly ToolTip processTip = new();
+    private readonly Label processTitle = DesktopTheme.Label("正在检查本地状态", 9.5f, true);
+    private readonly Label processDetail = DesktopTheme.Label("请稍候…", 8.5f);
+    private readonly Label processDot = DesktopTheme.Label("●", 14f, true);
+    private readonly Panel processBanner = new() { Dock = DockStyle.Fill, Padding = new Padding(14, 8, 14, 8), Margin = new Padding(0, 10, 0, 10) };
+    private readonly Button diagnosticsButton = DesktopTheme.Button("查看检查详情");
+    private readonly TextBox search = new() { PlaceholderText = "搜索标题或会话 ID", Dock = DockStyle.Fill, BorderStyle = BorderStyle.None, Font = new Font("Microsoft YaHei UI", 10f), AccessibleName = "搜索标题或会话 ID" };
+    private readonly Button clearSearch = DesktopTheme.Button("×");
+    private readonly ComboBox filter = new() { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat, Font = new Font("Microsoft YaHei UI", 9f), AccessibleName = "筛选会话状态" };
+    private readonly DataGridView list = new BufferedGrid();
+    private readonly Label listCount = DesktopTheme.Label("读取中", 8.5f);
+    private readonly Label emptyState = DesktopTheme.Label("正在读取会话…", 10f);
+    private readonly Button selectAll = DesktopTheme.Button("全选结果");
+    private readonly Button clearSelection = DesktopTheme.Button("清空选择");
+    private readonly Button refresh = DesktopTheme.Button("刷新");
+    private readonly Button repair = DesktopTheme.Button("检查失效引用");
+    private readonly Button preview = DesktopTheme.Button("预览清理范围  →", primary: true);
+    private readonly Label summary = DesktopTheme.Label("尚未选择清理内容", 11f, true);
+    private readonly Label selectionCount = DesktopTheme.Label("勾选会话后，先核对范围，再确认清理。", 8.5f);
+    private readonly Label detailStatus = DesktopTheme.Label("点击会话查看详情", 9f, true);
+    private readonly TextBox details = new() { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, BorderStyle = BorderStyle.None, ScrollBars = ScrollBars.Vertical, WordWrap = true, BackColor = Color.White, ForeColor = DesktopTheme.Ink, Font = new Font("Microsoft YaHei UI", 9f), AccessibleName = "会话完整详情，可选择并复制" };
+    private readonly Button copyDetails = DesktopTheme.Button("复制");
+    private readonly Button expandDetails = DesktopTheme.Button("展开");
+    private readonly CheckBox clearMemories = new() { Text = "全部本地记忆", AutoSize = true, ForeColor = DesktopTheme.Ink, Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold), AccessibleDescription = "可选，会清空所有聊天的合并记忆" };
+    private readonly CheckBox clearShared = new() { Text = "共享输入历史与日志", AutoSize = true, ForeColor = DesktopTheme.Ink, Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold), AccessibleDescription = "可选，会影响所有聊天的共享历史与日志" };
+    private readonly ToolTip tip = new() { AutoPopDelay = 20000, InitialDelay = 400, ReshowDelay = 100, ShowAlways = true };
     private readonly System.Windows.Forms.Timer processTimer = new() { Interval = 3000 };
     private Snapshot? state;
-    private bool busy, rendering;
+    private List<string> diagnostics = [];
+    private string? focusedChatId;
+    private bool busy, rendering, checkingProcess;
+    private string activity = "正在处理…";
 
-    public MainForm(Cleaner cleaner)
+    public MainForm(Cleaner cleaner, IUpdateChecker? updateChecker = null, Action<Uri>? openReleasePage = null)
     {
         this.cleaner = cleaner;
-        var version = Assembly.GetExecutingAssembly().GetName().Version!;
+        this.updateChecker = updateChecker ?? new UpdateChecker();
+        this.openReleasePage = openReleasePage ?? (uri => Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }));
+        var version = UpdateChecker.CurrentVersion;
         Text = $"Codex 本地清理台 {version.Major}.{version.Minor}.{version.Build}";
         Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!);
-        MinimumSize = new Size(820, 520);
-        Size = new Size(1080, 700);
-        BackColor = Canvas;
-        ForeColor = Ink;
-        Font = new Font("Microsoft YaHei UI", 9f);
+        AutoScaleDimensions = new SizeF(96, 96);
+        AutoScaleMode = AutoScaleMode.Dpi;
+        MinimumSize = new Size(960, 680);
+        Size = new Size(1180, 780);
         StartPosition = FormStartPosition.CenterScreen;
+        BackColor = DesktopTheme.Canvas;
+        ForeColor = DesktopTheme.Ink;
+        Font = new Font("Microsoft YaHei UI", 9f);
+        KeyPreview = true;
 
-        list.Columns.Add("聊天", 520);
-        list.Columns.Add("最近更新", 170);
-        list.Columns.Add("状态", 220);
-        list.Resize += (_, _) => ResizeChatColumn();
-
-        StyleButton(selectAll, primary: false);
-        StyleButton(refresh, primary: false);
-        StyleButton(repair, primary: false);
-        StyleButton(preview, primary: true);
-
-        var root = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            RowCount = 5,
-            Padding = new Padding(18, 12, 18, 12),
-            BackColor = Canvas,
-        };
-        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 58));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 58));
+        var root = CreateLayout(1, 5);
+        root.Padding = new Padding(20, 16, 20, 14);
+        root.BackColor = DesktopTheme.Canvas;
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 78));
+        root.RowStyles.Add(updateRowStyle);
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 76));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 160));
-
-        var masthead = BuildMasthead(version);
-        var statusStack = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            RowCount = 2,
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            BackColor = Canvas,
-            Margin = new Padding(0, 10, 0, 0),
-        };
-        statusStack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        statusStack.RowStyles.Add(new RowStyle(SizeType.Absolute, 56));
-        statusStack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        processBanner.Dock = DockStyle.Fill;
-        var processLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = Color.Transparent, Margin = Padding.Empty };
-        processLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        processLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        processLayout.Controls.Add(processDot, 0, 0);
-        var processText = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, AutoSize = true, BackColor = Color.Transparent, Margin = Padding.Empty };
-        processText.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        processText.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        processText.Controls.Add(processTitle, 0, 0);
-        processText.Controls.Add(processDetail, 0, 1);
-        processLayout.Controls.Add(processText, 1, 0);
-        processBanner.Controls.Add(processLayout);
-        processBanner.Height = 56;
-        statusStack.Controls.Add(processBanner, 0, 0);
-        alerts.Dock = DockStyle.Fill;
-        alerts.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-        alerts.MaximumSize = new Size(1500, 0);
-        alerts.Margin = new Padding(0, 7, 0, 0);
-        statusStack.Controls.Add(alerts, 0, 1);
-
-        var toolbar = BuildToolbar();
-        var listFrame = new Panel { Dock = DockStyle.Fill, BackColor = Surface, Padding = new Padding(1), Margin = new Padding(0, 2, 0, 8), BorderStyle = BorderStyle.FixedSingle };
-        var listHost = new Panel { Dock = DockStyle.Fill, BackColor = Surface };
-        listHost.Controls.Add(list);
-        listHost.Controls.Add(emptyState);
-        emptyState.BringToFront();
-        listFrame.Controls.Add(listHost);
-
-        var bottom = BuildBottomPanel();
-        root.Controls.Add(masthead, 0, 0);
-        root.Controls.Add(statusStack, 0, 1);
-        root.Controls.Add(toolbar, 0, 2);
-        root.Controls.Add(listFrame, 0, 3);
-        root.Controls.Add(bottom, 0, 4);
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 82));
+        root.Controls.Add(BuildMasthead(version), 0, 0);
+        root.Controls.Add(BuildUpdateBanner(), 0, 1);
+        root.Controls.Add(BuildProcessBanner(), 0, 2);
+        var body = CreateLayout(2, 1);
+        body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 68));
+        body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 32));
+        body.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        body.Controls.Add(BuildListPanel(), 0, 0);
+        body.Controls.Add(BuildSidebar(), 1, 0);
+        root.Controls.Add(body, 0, 3);
+        root.Controls.Add(BuildFooter(), 0, 4);
         Controls.Add(root);
 
+        filter.Items.AddRange(["全部会话", "可清理", "仅清理记录", "受保护", "已归档"]);
+        filter.SelectedIndex = 0;
         search.TextChanged += (_, _) => RenderChats();
-        list.ItemCheck += OnItemCheck;
-        list.ItemChecked += (_, e) => { if (!rendering) Toggle((string)e.Item.Tag!, e.Item.Checked); };
+        clearSearch.Click += (_, _) => { search.Clear(); search.Focus(); };
+        filter.SelectedIndexChanged += (_, _) => RenderChats();
+        list.CellClick += (_, e) => { if (e.RowIndex >= 0 && e.ColumnIndex == 0) ToggleRow(e.RowIndex); };
+        list.CurrentCellChanged += (_, _) => { if (!rendering) RenderDetails(); };
+        list.CellPainting += PaintStatus;
+        list.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode != Keys.Space || list.CurrentRow is null) return;
+            e.Handled = e.SuppressKeyPress = true;
+            ToggleRow(list.CurrentRow.Index);
+        };
         selectAll.Click += (_, _) => ToggleVisibleChats();
+        clearSelection.Click += (_, _) => { selected.Clear(); RenderChats(); };
         clearMemories.CheckedChanged += (_, _) => RenderSelection();
         clearShared.CheckedChanged += (_, _) => RenderSelection();
         refresh.Click += async (_, _) => await Reload();
+        checkUpdates.Click += async (_, _) => await CheckForUpdates(manual: true);
+        downloadUpdate.Click += (_, _) => OpenUpdate();
         repair.Click += async (_, _) => await PreviewRepair();
         preview.Click += async (_, _) => await PreviewCleanup();
-        processTimer.Tick += async (_, _) => { if (!busy) SetProcess(await Task.Run(cleaner.CheckProcesses)); };
-        Shown += async (_, _) => { ResizeChatColumn(); await Reload(); processTimer.Start(); };
+        diagnosticsButton.Click += (_, _) => ShowDiagnostics();
+        expandDetails.Click += (_, _) => ShowTextDialog("会话完整详情", details.Text);
+        copyDetails.Click += (_, _) =>
+        {
+            try { if (details.TextLength > 0) Clipboard.SetText(details.Text); }
+            catch (ExternalException) { MessageBox.Show(this, "剪贴板暂时被其他程序占用，请稍后重试。", "无法复制", MessageBoxButtons.OK, MessageBoxIcon.Information); }
+        };
+        processTimer.Tick += async (_, _) => await RefreshProcessState();
+        Shown += async (_, _) =>
+        {
+            ApplyGridMetrics();
+            var updateTask = CheckForUpdates(manual: false);
+            await Reload();
+            if (!IsDisposed) { ActiveControl = search; processTimer.Start(); }
+            await updateTask;
+        };
+        DpiChanged += (_, _) => BeginInvoke(() =>
+        {
+            ApplyGridMetrics();
+            if (availableUpdate is not null) updateRowStyle.Height = 52 * DeviceDpi / 96f;
+        });
+        KeyDown += async (_, e) =>
+        {
+            if (busy) return;
+            if (e.Control && e.KeyCode == Keys.F) { e.SuppressKeyPress = true; search.Focus(); search.SelectAll(); }
+            else if (e.KeyCode == Keys.F5) { e.SuppressKeyPress = true; await Reload(); }
+            else if (e.KeyCode == Keys.Escape && search.ContainsFocus) { e.SuppressKeyPress = true; search.Clear(); }
+        };
         FormClosing += (_, e) =>
         {
             if (!busy) return;
             e.Cancel = true;
-            MessageBox.Show(this, "清理或修复正在进行，请等待完成后再关闭。", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(this, "正在处理本地数据，请等待完成后再关闭。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
         };
+        tip.SetToolTip(search, "搜索标题或会话 ID · Ctrl+F");
+        tip.SetToolTip(refresh, "重新读取本地记录 · F5");
+        tip.SetToolTip(clearSearch, "清除搜索");
+        tip.SetToolTip(repair, "检查已删除会话留下的本地界面引用；先预览，再确认修复。");
+        tip.SetToolTip(expandDetails, "在独立窗口查看完整标题、路径和处理原因");
+        tip.SetToolTip(checkUpdates, "启动时自动检查 GitHub 正式版；也可点击重新检查。不发送本地会话数据。");
+        RenderSelection();
     }
 
-    private static void StyleButton(Button button, bool primary)
+    private static TableLayoutPanel CreateLayout(int columns, int rows)
     {
-        button.AutoSize = true;
-        button.AutoSizeMode = AutoSizeMode.GrowAndShrink;
-        button.Padding = new Padding(primary ? 16 : 11, 7, primary ? 16 : 11, 7);
-        button.Margin = new Padding(0, 0, 8, 0);
-        button.Font = new Font("Microsoft YaHei UI", 9f, primary ? FontStyle.Bold : FontStyle.Regular);
-        button.FlatStyle = FlatStyle.Flat;
-        button.FlatAppearance.BorderSize = 1;
-        button.FlatAppearance.BorderColor = primary ? Accent : Color.FromArgb(209, 216, 226);
-        button.BackColor = primary ? Accent : Surface;
-        button.ForeColor = primary ? Color.White : Ink;
-        button.Cursor = Cursors.Hand;
-        button.UseVisualStyleBackColor = false;
+        var panel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = columns, RowCount = rows, Margin = Padding.Empty, BackColor = Color.Transparent };
+        if (columns == 1) panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        return panel;
     }
 
-    private static Panel BuildMasthead(Version version)
+    private Control BuildMasthead(Version version)
     {
-        var header = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, BackColor = Surface, Padding = new Padding(2, 5, 2, 5), Margin = Padding.Empty };
-        header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 44));
+        var header = CreateLayout(4, 1);
+        header.BackColor = DesktopTheme.Navy;
+        header.Padding = new Padding(18, 12, 18, 12);
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 52));
         header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 86));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         header.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        var brand = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(231, 239, 255), Margin = new Padding(0, 0, 10, 0) };
-        var glyph = new Label { Dock = DockStyle.Fill, Text = "C", TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 15f, FontStyle.Bold), ForeColor = Accent };
-        brand.Controls.Add(glyph);
-        var text = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent };
-        text.Controls.Add(new Label { Text = "Codex 本地清理台", AutoSize = true, Location = new Point(0, 0), Font = new Font("Microsoft YaHei UI", 11.5f, FontStyle.Bold), ForeColor = Ink });
-        text.Controls.Add(new Label { Text = "筛选聊天，核对范围后再执行", AutoSize = true, Location = new Point(1, 24), Font = new Font("Microsoft YaHei UI", 8f), ForeColor = Muted });
-        var badge = new Label
-        {
-            Text = $"v{version.Major}.{version.Minor}.{version.Build}", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter,
-            ForeColor = Muted, BackColor = Color.FromArgb(242, 244, 247),
-            Padding = new Padding(7, 2, 7, 2), Margin = new Padding(0, 2, 0, 2), Font = new Font("Segoe UI", 8f, FontStyle.Bold),
-        };
+        var brand = DesktopTheme.Label("C", 22f, true);
+        brand.BackColor = DesktopTheme.Accent;
+        brand.ForeColor = Color.White;
+        brand.Dock = DockStyle.Fill;
+        brand.TextAlign = ContentAlignment.MiddleCenter;
+        brand.Margin = new Padding(0, 0, 12, 0);
         header.Controls.Add(brand, 0, 0);
+        var text = CreateLayout(1, 2);
+        text.RowStyles.Add(new RowStyle(SizeType.Percent, 58));
+        text.RowStyles.Add(new RowStyle(SizeType.Percent, 42));
+        var title = DesktopTheme.Label("Codex 本地清理台", 17f, true);
+        title.ForeColor = Color.White;
+        title.Dock = DockStyle.Fill;
+        var subtitle = DesktopTheme.Label("让本地记录，重新井然有序。", 8.5f);
+        subtitle.ForeColor = Color.FromArgb(178, 192, 214);
+        subtitle.Dock = DockStyle.Fill;
+        text.Controls.Add(title, 0, 0);
+        text.Controls.Add(subtitle, 0, 1);
         header.Controls.Add(text, 1, 0);
+        var badge = DesktopTheme.Label($"本地模式\n v{version.Major}.{version.Minor}.{version.Build}", 8.5f, true);
+        badge.ForeColor = Color.FromArgb(193, 207, 228);
+        badge.Dock = DockStyle.Fill;
+        badge.TextAlign = ContentAlignment.MiddleRight;
         header.Controls.Add(badge, 2, 0);
+        checkUpdates.Anchor = AnchorStyles.Right;
+        checkUpdates.Margin = new Padding(14, 0, 0, 0);
+        header.Controls.Add(checkUpdates, 3, 0);
         return header;
     }
 
-    private Control BuildToolbar()
+    private Control BuildUpdateBanner()
     {
-        var toolbar = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, BackColor = Canvas, Padding = new Padding(0, 5, 0, 7), Margin = Padding.Empty };
-        toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        toolbar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-
-        var searchPanel = new Panel { Dock = DockStyle.Fill, BackColor = Canvas, Margin = Padding.Empty };
-        search.Dock = DockStyle.Fill;
-        search.Margin = new Padding(0, 0, 8, 0);
-        searchPanel.Controls.Add(search);
-        var heading = new Panel { Dock = DockStyle.Fill, Width = 208, BackColor = Canvas, Margin = new Padding(0, 0, 10, 0) };
-        heading.Controls.Add(new Label { Text = "本地聊天", AutoSize = true, Location = new Point(0, 0), Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold), ForeColor = Ink });
-        heading.Controls.Add(new Label { Text = "选择需要清理的会话", AutoSize = true, Location = new Point(1, 23), Font = new Font("Microsoft YaHei UI", 8f), ForeColor = Muted });
-        var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = false, FlowDirection = FlowDirection.LeftToRight, BackColor = Canvas, Margin = Padding.Empty, Padding = new Padding(0, 1, 0, 0) };
-        actions.Controls.Add(selectAll);
-        actions.Controls.Add(refresh);
-        actions.Controls.Add(repair);
-        toolbar.Controls.Add(heading, 0, 0);
-        toolbar.Controls.Add(searchPanel, 1, 0);
-        toolbar.Controls.Add(actions, 2, 0);
-        return toolbar;
+        var row = CreateLayout(2, 1);
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        row.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        updateNotice.Dock = DockStyle.Fill;
+        updateNotice.TextAlign = ContentAlignment.MiddleLeft;
+        updateNotice.AutoEllipsis = true;
+        updateNotice.ForeColor = DesktopTheme.Accent;
+        downloadUpdate.Anchor = AnchorStyles.Right;
+        row.Controls.Add(updateNotice, 0, 0);
+        row.Controls.Add(downloadUpdate, 1, 0);
+        updateBanner.Controls.Add(row);
+        return updateBanner;
     }
 
-    private Control BuildBottomPanel()
+    private async Task CheckForUpdates(bool manual)
     {
-        var bottom = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, BackColor = Canvas, Padding = new Padding(0, 4, 0, 0), Margin = Padding.Empty };
-        bottom.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
-        bottom.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
-        bottom.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        bottom.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
+        if (checkingUpdate || IsDisposed || updateCancellation.IsCancellationRequested) return;
+        checkingUpdate = true;
+        checkUpdates.Enabled = false;
+        checkUpdates.Text = "检查中…";
+        try
+        {
+            var update = await updateChecker.CheckAsync(updateCancellation.Token);
+            if (IsDisposed || updateCancellation.IsCancellationRequested) return;
+            availableUpdate = update;
+            updateBanner.Visible = update is not null;
+            updateRowStyle.Height = update is null ? 0 : 52 * DeviceDpi / 96f;
+            if (update is not null)
+            {
+                updateNotice.Text = $"发现新版本 v{update.Version} · 当前 v{UpdateChecker.CurrentVersion}";
+                tip.SetToolTip(updateNotice, updateNotice.Text);
+                tip.SetToolTip(downloadUpdate, "打开 GitHub 发布页，下载新版后退出并替换程序。");
+            }
+            checkUpdates.Text = update is null && manual ? "已是最新版本" : "检查更新";
+            tip.SetToolTip(checkUpdates, update is null ? "当前已是最新正式版。点击可重新检查。" : "发现新版本，点击「前往更新」查看发布说明和下载。");
+        }
+        catch (Exception error) when (error is HttpRequestException or IOException or JsonException or OperationCanceledException)
+        {
+            if (IsDisposed || updateCancellation.IsCancellationRequested) return;
+            checkUpdates.Text = manual ? "检查失败，重试" : "检查更新";
+            tip.SetToolTip(checkUpdates, "暂时无法检查更新，请检查网络后重试。本地清理可继续使用。");
+        }
+        finally
+        {
+            checkingUpdate = false;
+            if (!IsDisposed && !updateCancellation.IsCancellationRequested) checkUpdates.Enabled = true;
+        }
+    }
 
-        var summaryBar = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = Canvas, Margin = Padding.Empty };
-        summaryBar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        summaryBar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        summaryBar.Controls.Add(summary, 0, 0);
-        summaryBar.Controls.Add(selectionCount, 1, 0);
+    private void OpenUpdate()
+    {
+        if (availableUpdate is null || busy) return;
+        try { openReleasePage(availableUpdate.ReleaseUri); }
+        catch (Exception error) when (error is Win32Exception or InvalidOperationException)
+        {
+            MessageBox.Show(this, $"无法打开浏览器，请访问发布页：\n{availableUpdate.ReleaseUri.AbsoluteUri}", "前往更新", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+    }
 
-        var optionsCard = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2, BackColor = Surface, Padding = new Padding(12, 9, 12, 8), Margin = new Padding(0, 0, 0, 7) };
-        optionsCard.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 56));
-        optionsCard.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 44));
-        optionsCard.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
-        optionsCard.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
-        clearMemories.Margin = new Padding(0, 2, 4, 0);
-        clearShared.Margin = new Padding(0, 2, 4, 0);
-        optionsCard.Controls.Add(clearMemories, 0, 0);
-        optionsCard.Controls.Add(new Label { Text = "合并记忆可能涵盖多条聊天", AutoSize = true, ForeColor = Muted, Anchor = AnchorStyles.Left, Font = new Font("Microsoft YaHei UI", 8f) }, 1, 0);
-        optionsCard.Controls.Add(clearShared, 0, 1);
-        optionsCard.Controls.Add(new Label { Text = "会影响所有聊天", AutoSize = true, ForeColor = Muted, Anchor = AnchorStyles.Left, Font = new Font("Microsoft YaHei UI", 8f) }, 1, 1);
+    private Control BuildProcessBanner()
+    {
+        processBanner.BackColor = Color.FromArgb(236, 241, 248);
+        var row = CreateLayout(3, 1);
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 28));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        row.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        processDot.Dock = DockStyle.Fill;
+        processDot.TextAlign = ContentAlignment.MiddleLeft;
+        row.Controls.Add(processDot, 0, 0);
+        var text = CreateLayout(1, 2);
+        text.RowStyles.Add(new RowStyle(SizeType.Percent, 52));
+        text.RowStyles.Add(new RowStyle(SizeType.Percent, 48));
+        processTitle.Dock = processDetail.Dock = DockStyle.Fill;
+        processTitle.AutoEllipsis = processDetail.AutoEllipsis = true;
+        text.Controls.Add(processTitle, 0, 0);
+        text.Controls.Add(processDetail, 0, 1);
+        row.Controls.Add(text, 1, 0);
+        diagnosticsButton.Visible = false;
+        diagnosticsButton.Anchor = AnchorStyles.Right;
+        row.Controls.Add(diagnosticsButton, 2, 0);
+        processBanner.Controls.Add(row);
+        return processBanner;
+    }
 
-        var footer = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = Canvas, Margin = Padding.Empty };
+    private Control BuildListPanel()
+    {
+        var card = new SurfacePanel { Dock = DockStyle.Fill, Padding = new Padding(15, 12, 15, 8), Margin = new Padding(0, 0, 12, 0) };
+        var panel = CreateLayout(1, 4);
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 39));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 43));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 43));
+        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        var titleRow = CreateLayout(3, 1);
+        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 72));
+        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        titleRow.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        var title = DesktopTheme.Label("会话", 12f, true);
+        title.Dock = DockStyle.Fill;
+        title.TextAlign = ContentAlignment.MiddleLeft;
+        listCount.Dock = DockStyle.Fill;
+        listCount.TextAlign = ContentAlignment.MiddleLeft;
+        listCount.AutoEllipsis = true;
+        refresh.Anchor = AnchorStyles.Right;
+        titleRow.Controls.Add(title, 0, 0);
+        titleRow.Controls.Add(listCount, 1, 0);
+        titleRow.Controls.Add(refresh, 2, 0);
+        panel.Controls.Add(titleRow, 0, 0);
+
+        var searchRow = CreateLayout(2, 1);
+        searchRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        searchRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 143));
+        searchRow.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        var searchFrame = new SurfacePanel { Dock = DockStyle.Fill, Padding = new Padding(11, 6, 3, 4), Margin = new Padding(0, 2, 10, 4), BorderColor = DesktopTheme.Border };
+        var searchInner = CreateLayout(3, 1);
+        searchInner.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 39));
+        searchInner.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        searchInner.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 26));
+        searchInner.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        search.Margin = Padding.Empty;
+        clearSearch.AutoSize = false;
+        clearSearch.Dock = DockStyle.Fill;
+        clearSearch.Padding = clearSearch.Margin = Padding.Empty;
+        clearSearch.FlatAppearance.BorderSize = 0;
+        clearSearch.Font = new Font("Segoe UI", 12f);
+        clearSearch.AccessibleName = "清除搜索";
+        var searchLabel = DesktopTheme.Label("搜索", 8.5f);
+        searchLabel.Dock = DockStyle.Fill;
+        searchLabel.TextAlign = ContentAlignment.MiddleLeft;
+        searchInner.Controls.Add(searchLabel, 0, 0);
+        searchInner.Controls.Add(search, 1, 0);
+        searchInner.Controls.Add(clearSearch, 2, 0);
+        searchFrame.Controls.Add(searchInner);
+        searchRow.Controls.Add(searchFrame, 0, 0);
+        filter.Margin = new Padding(0, 7, 0, 0);
+        searchRow.Controls.Add(filter, 1, 0);
+        panel.Controls.Add(searchRow, 0, 1);
+
+        var actions = CreateLayout(2, 1);
+        actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        actions.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        actions.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        var selectionActions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = Padding.Empty, Padding = new Padding(0, 2, 0, 0), BackColor = Color.Transparent };
+        selectAll.Margin = new Padding(0, 0, 7, 0);
+        selectionActions.Controls.Add(selectAll);
+        selectionActions.Controls.Add(clearSelection);
+        repair.Anchor = AnchorStyles.Right;
+        actions.Controls.Add(selectionActions, 0, 0);
+        actions.Controls.Add(repair, 1, 0);
+        panel.Controls.Add(actions, 0, 2);
+
+        ConfigureGrid();
+        var host = new Panel { Dock = DockStyle.Fill, BackColor = Color.White, Margin = Padding.Empty };
+        emptyState.Dock = DockStyle.Fill;
+        emptyState.TextAlign = ContentAlignment.MiddleCenter;
+        emptyState.BackColor = Color.White;
+        host.Controls.Add(list);
+        host.Controls.Add(emptyState);
+        emptyState.BringToFront();
+        panel.Controls.Add(host, 0, 3);
+        card.Controls.Add(panel);
+        return card;
+    }
+
+    private void ConfigureGrid()
+    {
+        list.Dock = DockStyle.Fill;
+        list.BackgroundColor = Color.White;
+        list.BorderStyle = BorderStyle.None;
+        list.CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal;
+        list.GridColor = Color.FromArgb(238, 242, 247);
+        list.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None;
+        list.EnableHeadersVisualStyles = false;
+        list.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
+        list.ColumnHeadersHeight = 36;
+        list.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle { BackColor = Color.FromArgb(247, 249, 252), ForeColor = DesktopTheme.Muted, Font = new Font("Microsoft YaHei UI", 8.5f), SelectionBackColor = Color.FromArgb(247, 249, 252), Padding = new Padding(5, 0, 0, 0) };
+        list.DefaultCellStyle = new DataGridViewCellStyle { BackColor = Color.White, ForeColor = DesktopTheme.Ink, Font = new Font("Microsoft YaHei UI", 9.5f), SelectionBackColor = Color.FromArgb(235, 242, 255), SelectionForeColor = DesktopTheme.Ink, Padding = new Padding(5, 0, 0, 0) };
+        list.RowTemplate.Height = 43;
+        list.RowHeadersVisible = false;
+        list.ReadOnly = true;
+        list.AllowUserToAddRows = list.AllowUserToDeleteRows = list.AllowUserToResizeRows = list.AllowUserToOrderColumns = false;
+        list.AllowUserToResizeColumns = false;
+        list.MultiSelect = false;
+        list.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+        list.AutoGenerateColumns = false;
+        list.ShowCellToolTips = true;
+        list.AccessibleName = "本地会话列表，点击会话查看详情，勾选或按空格选择清理";
+        list.Columns.Add(new DataGridViewCheckBoxColumn { Name = "Selected", HeaderText = "", Width = 34, SortMode = DataGridViewColumnSortMode.NotSortable, Resizable = DataGridViewTriState.False, DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleCenter, Padding = Padding.Empty } });
+        list.Columns.Add(new DataGridViewTextBoxColumn { Name = "Title", HeaderText = "会话标题", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, MinimumWidth = 130, SortMode = DataGridViewColumnSortMode.NotSortable });
+        list.Columns.Add(new DataGridViewTextBoxColumn { Name = "Updated", HeaderText = "最近更新", Width = 120, SortMode = DataGridViewColumnSortMode.NotSortable, DefaultCellStyle = new DataGridViewCellStyle { Font = new Font("Microsoft YaHei UI", 8f), ForeColor = DesktopTheme.Muted } });
+        list.Columns.Add(new DataGridViewTextBoxColumn { Name = "Status", HeaderText = "处理方式", Width = 108, SortMode = DataGridViewColumnSortMode.NotSortable });
+    }
+
+    private Control BuildSidebar()
+    {
+        var sidebar = CreateLayout(1, 2);
+        sidebar.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        sidebar.RowStyles.Add(new RowStyle(SizeType.Absolute, 187));
+        var detailCard = new SurfacePanel { Dock = DockStyle.Fill, Padding = new Padding(16, 12, 12, 13), Margin = new Padding(0, 0, 0, 12) };
+        var detailLayout = CreateLayout(1, 3);
+        detailLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+        detailLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
+        detailLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        var detailHeading = CreateLayout(3, 1);
+        detailHeading.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        detailHeading.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        detailHeading.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        detailHeading.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        var detailTitle = DesktopTheme.Label("会话详情", 11f, true);
+        detailTitle.Dock = DockStyle.Fill;
+        detailTitle.TextAlign = ContentAlignment.MiddleLeft;
+        copyDetails.Anchor = AnchorStyles.Right;
+        copyDetails.Font = new Font("Microsoft YaHei UI", 8f);
+        copyDetails.Padding = new Padding(6, 3, 6, 3);
+        expandDetails.Anchor = AnchorStyles.Right;
+        expandDetails.Font = copyDetails.Font;
+        expandDetails.Padding = copyDetails.Padding;
+        expandDetails.Margin = new Padding(0, 0, 6, 0);
+        expandDetails.AccessibleName = "展开会话完整详情";
+        detailHeading.Controls.Add(detailTitle, 0, 0);
+        detailHeading.Controls.Add(expandDetails, 1, 0);
+        detailHeading.Controls.Add(copyDetails, 2, 0);
+        detailLayout.Controls.Add(detailHeading, 0, 0);
+        detailStatus.Dock = DockStyle.Fill;
+        detailStatus.TextAlign = ContentAlignment.MiddleLeft;
+        detailStatus.AutoEllipsis = true;
+        detailLayout.Controls.Add(detailStatus, 0, 1);
+        details.Margin = new Padding(0, 5, 0, 0);
+        detailLayout.Controls.Add(details, 0, 2);
+        detailCard.Controls.Add(detailLayout);
+        sidebar.Controls.Add(detailCard, 0, 0);
+
+        var options = new SurfacePanel { Dock = DockStyle.Fill, Padding = new Padding(16, 12, 16, 11), Margin = Padding.Empty };
+        var optionLayout = CreateLayout(1, 6);
+        optionLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 25));
+        optionLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
+        optionLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 25));
+        optionLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 23));
+        optionLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 25));
+        optionLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        var optionTitle = DesktopTheme.Label("附加清理", 11f, true);
+        optionTitle.Dock = DockStyle.Fill;
+        optionLayout.Controls.Add(optionTitle, 0, 0);
+        var optionHint = DesktopTheme.Label("可选 · 以下范围涉及所有聊天", 8f);
+        optionHint.Dock = DockStyle.Fill;
+        optionLayout.Controls.Add(optionHint, 0, 1);
+        clearMemories.Margin = new Padding(0, 3, 0, 0);
+        clearShared.Margin = new Padding(0, 3, 0, 0);
+        optionLayout.Controls.Add(clearMemories, 0, 2);
+        var memoryHint = DesktopTheme.Label("清空已提取及合并的本地记忆", 8f);
+        memoryHint.Dock = DockStyle.Fill;
+        memoryHint.Padding = new Padding(20, 0, 0, 0);
+        optionLayout.Controls.Add(memoryHint, 0, 3);
+        optionLayout.Controls.Add(clearShared, 0, 4);
+        var sharedHint = DesktopTheme.Label("清空共享输入记录与数据库日志", 8f);
+        sharedHint.Dock = DockStyle.Fill;
+        sharedHint.Padding = new Padding(20, 0, 0, 0);
+        optionLayout.Controls.Add(sharedHint, 0, 5);
+        options.Controls.Add(optionLayout);
+        sidebar.Controls.Add(options, 0, 1);
+        return sidebar;
+    }
+
+    private Control BuildFooter()
+    {
+        var footer = CreateLayout(2, 1);
+        footer.Padding = new Padding(3, 13, 0, 0);
         footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        footer.Controls.Add(new Label
-        {
-            Text = "所有改动都会先预览确认 · 项目、插件、设置和云端记录不受影响",
-            AutoSize = true, Anchor = AnchorStyles.Left, ForeColor = Muted, Font = new Font("Microsoft YaHei UI", 8f),
-        }, 0, 0);
-        preview.Margin = new Padding(8, 1, 0, 0);
+        footer.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        var description = CreateLayout(1, 2);
+        description.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
+        description.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        summary.Dock = selectionCount.Dock = DockStyle.Fill;
+        summary.AutoEllipsis = selectionCount.AutoEllipsis = true;
+        description.Controls.Add(summary, 0, 0);
+        description.Controls.Add(selectionCount, 0, 1);
+        footer.Controls.Add(description, 0, 0);
+        preview.Padding = new Padding(23, 11, 23, 11);
+        preview.Margin = new Padding(16, 0, 0, 0);
+        preview.Anchor = AnchorStyles.Right | AnchorStyles.Top;
         footer.Controls.Add(preview, 1, 0);
-
-        bottom.Controls.Add(summaryBar, 0, 0);
-        bottom.Controls.Add(new Label { Text = "附加清理范围", AutoSize = true, Anchor = AnchorStyles.Left, Font = new Font("Microsoft YaHei UI", 8.5f, FontStyle.Bold), ForeColor = Muted, Margin = Padding.Empty }, 0, 1);
-        bottom.Controls.Add(optionsCard, 0, 2);
-        bottom.Controls.Add(footer, 0, 3);
-        return bottom;
+        return footer;
     }
+
+    private static bool Selectable(ChatInfo chat) => chat.CanDelete || chat.CanRemoveRecord;
 
     private IEnumerable<ChatInfo> VisibleChats()
     {
         var q = search.Text.Trim();
-        return (state?.Chats ?? []).Where(c => q.Length == 0 || c.Title.Contains(q, StringComparison.CurrentCultureIgnoreCase) || c.Id.Contains(q, StringComparison.OrdinalIgnoreCase));
+        return (state?.Chats ?? []).Where(c =>
+            (q.Length == 0 || c.Title.Contains(q, StringComparison.CurrentCultureIgnoreCase) || c.Id.Contains(q, StringComparison.OrdinalIgnoreCase)) &&
+            (filter.SelectedIndex switch { 1 => Selectable(c), 2 => c.CanRemoveRecord, 3 => !Selectable(c), 4 => c.Archived, _ => true }));
     }
 
-    private void ResizeChatColumn()
+    private static string StatusText(ChatInfo chat) => chat.CanRemoveRecord ? "仅清理记录" : !chat.CanDelete ? "受保护" : chat.RolloutMissing ? "文件已缺失" : chat.Archived ? "已归档" : "本地会话";
+
+    private static (Color Ink, Color Fill) StatusColors(ChatInfo chat) => chat.CanRemoveRecord || chat.RolloutMissing
+        ? (Color.FromArgb(152, 94, 19), Color.FromArgb(255, 246, 224))
+        : !chat.CanDelete ? (Color.FromArgb(140, 66, 66), Color.FromArgb(253, 237, 237))
+        : chat.Archived ? (Color.FromArgb(112, 84, 158), Color.FromArgb(244, 239, 252))
+        : (Color.FromArgb(42, 107, 92), Color.FromArgb(234, 247, 241));
+
+    private void PaintStatus(object? sender, DataGridViewCellPaintingEventArgs e)
     {
-        if (list.Columns.Count < 3) return;
-        var remaining = list.ClientSize.Width - list.Columns[1].Width - list.Columns[2].Width - SystemInformation.VerticalScrollBarWidth - 4;
-        list.Columns[0].Width = Math.Max(240, remaining);
+        if (e.RowIndex < 0 || e.ColumnIndex != 3 || list.Rows[e.RowIndex].Tag is not ChatInfo chat || e.Graphics is null) return;
+        e.PaintBackground(e.ClipBounds, true);
+        var (ink, fill) = StatusColors(chat);
+        var scale = DeviceDpi / 96f;
+        var inset = Math.Max(2, (int)(e.CellBounds.Height * 0.19f));
+        var pill = new Rectangle(e.CellBounds.Left + (int)(5 * scale), e.CellBounds.Top + inset, e.CellBounds.Width - (int)(13 * scale), e.CellBounds.Height - 2 * inset);
+        if (pill.Width > 0 && pill.Height > 0)
+        {
+            using var brush = new SolidBrush(fill);
+            using var path = DesktopTheme.RoundedRect(pill, 5 * scale);
+            e.Graphics.FillPath(brush, path);
+            TextRenderer.DrawText(e.Graphics, StatusText(chat), e.CellStyle?.Font ?? list.Font, pill, ink, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+        }
+        e.Handled = true;
     }
 
-    private void OnItemCheck(object? sender, ItemCheckEventArgs e)
+    private void ApplyGridMetrics()
     {
-        if (!rendering && e.NewValue == CheckState.Checked && list.Items[e.Index].Tag is string id && state?.Chats.FirstOrDefault(c => c.Id == id) is { CanDelete: false })
-            e.NewValue = CheckState.Unchecked;
+        if (IsDisposed || list.Columns.Count < 4) return;
+        int ScaleSize(int value) => (int)Math.Round(value * DeviceDpi / 96f);
+        list.RowTemplate.Height = ScaleSize(43);
+        list.ColumnHeadersHeight = ScaleSize(36);
+        list.Columns[0].Width = ScaleSize(34);
+        list.Columns[1].MinimumWidth = ScaleSize(130);
+        list.Columns[2].Width = ScaleSize(142);
+        list.Columns[3].Width = ScaleSize(108);
+        foreach (DataGridViewRow row in list.Rows) row.Height = list.RowTemplate.Height;
+        list.Invalidate();
     }
 
-    private void Toggle(string id, bool on)
+    private void ToggleRow(int index)
     {
-        if (on) selected.Add(id); else selected.Remove(id);
-        RenderSelectAll();
+        if (busy || index < 0 || index >= list.Rows.Count || list.Rows[index].Tag is not ChatInfo chat) return;
+        list.CurrentCell = list.Rows[index].Cells[1];
+        if (!Selectable(chat)) { RenderDetails(); return; }
+        if (!selected.Add(chat.Id)) selected.Remove(chat.Id);
+        list.Rows[index].Cells[0].Value = selected.Contains(chat.Id);
         RenderSelection();
     }
 
     private void ToggleVisibleChats()
     {
-        var selectable = VisibleChats().Where(c => c.CanDelete).ToList();
+        var selectable = VisibleChats().Where(Selectable).ToList();
         var clear = selectable.Count > 0 && selectable.All(c => selected.Contains(c.Id));
         foreach (var chat in selectable)
-        {
-            if (clear) selected.Remove(chat.Id);
-            else selected.Add(chat.Id);
-        }
+            if (clear) selected.Remove(chat.Id); else selected.Add(chat.Id);
         RenderChats();
     }
 
-    private async Task Run(Func<Task> action)
+    private void RenderChats()
+    {
+        if (IsDisposed) return;
+        rendering = true;
+        list.SuspendLayout();
+        try
+        {
+            list.Rows.Clear();
+            foreach (var chat in VisibleChats())
+            {
+                var index = list.Rows.Add(selected.Contains(chat.Id), chat.Title, chat.UpdatedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "—", StatusText(chat));
+                var row = list.Rows[index];
+                row.Tag = chat;
+                foreach (DataGridViewCell cell in row.Cells) cell.ToolTipText = $"{chat.Title}\n{chat.Id}\n{StatusText(chat)}" + (chat.BlockedReason is null ? "" : "\n" + chat.BlockedReason);
+            }
+            var focus = list.Rows.Cast<DataGridViewRow>().FirstOrDefault(r => r.Tag is ChatInfo c && c.Id == focusedChatId);
+            list.ClearSelection();
+            if (focus is not null) { list.CurrentCell = focus.Cells[1]; focus.Selected = true; }
+            else list.CurrentCell = null;
+        }
+        finally { list.ResumeLayout(); rendering = false; }
+        emptyState.Text = state is null ? "暂时无法读取会话\n点击「刷新」重新检查" : state.Chats.Count == 0 ? "还没有本地会话\n识别到的聊天会显示在这里" : "没有匹配的会话\n试试其他关键词或筛选条件";
+        emptyState.Visible = list.Rows.Count == 0;
+        list.Visible = list.Rows.Count > 0;
+        listCount.Text = state is null ? "尚未加载" : $"{state.Chats.Count} 条记录 · 显示 {list.Rows.Count} 条";
+        RenderDetails();
+        RenderSelection();
+    }
+
+    private void RenderDetails()
+    {
+        if (list.CurrentRow?.Tag is not ChatInfo chat)
+        {
+            focusedChatId = null;
+            detailStatus.Text = "选择一条会话";
+            detailStatus.ForeColor = DesktopTheme.Muted;
+            details.Text = "点击列表中的会话，在这里查看完整标题、路径和处理说明。\r\n\r\n勾选方框才会加入清理范围。";
+            details.SelectionStart = details.SelectionLength = 0;
+            copyDetails.Enabled = expandDetails.Enabled = false;
+            return;
+        }
+        focusedChatId = chat.Id;
+        detailStatus.Text = StatusText(chat);
+        detailStatus.ForeColor = StatusColors(chat).Ink;
+        var explanation = chat.CanRemoveRecord
+            ? "可清理这条会话的本地数据库记录与已识别关联。原会话文件会保留，不会访问或删除该路径。"
+            : !chat.CanDelete ? "当前无法清理这条会话，请先处理下面的原因。"
+            : chat.RolloutMissing ? "会话文件已缺失，可清理残留的本地记录与关联。"
+            : "将清理这条会话及已验证的本地关联；实际影响范围会在下一步列出。";
+        details.Text = $"{chat.Title}\r\n\r\n{explanation}"
+            + (chat.BlockedReason is null ? "" : $"\r\n\r\n检查说明\r\n{chat.BlockedReason}")
+            + $"\r\n\r\n会话 ID\r\n{chat.Id}\r\n\r\n会话路径\r\n{(string.IsNullOrWhiteSpace(chat.OriginalPath) ? chat.RelativePath ?? "未提供会话文件路径" : chat.OriginalPath)}"
+            + $"\r\n\r\n最近更新\r\n{chat.UpdatedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "未知"}"
+            + (chat.Archived ? "\r\n\r\n归档状态\r\n已归档" : "");
+        details.SelectionStart = 0;
+        details.SelectionLength = 0;
+        copyDetails.Enabled = expandDetails.Enabled = true;
+    }
+
+    private void RenderSelection()
+    {
+        if (IsDisposed) return;
+        var visible = VisibleChats().ToList();
+        var selectable = visible.Where(Selectable).ToList();
+        var hidden = selected.Count - visible.Count(c => selected.Contains(c.Id));
+        var recordOnly = state?.Chats.Count(c => selected.Contains(c.Id) && c.CanRemoveRecord) ?? 0;
+        var parts = new List<string>();
+        if (selected.Count > 0) parts.Add($"已选 {selected.Count} 条会话");
+        if (clearMemories.Checked) parts.Add("全部本地记忆");
+        if (clearShared.Checked) parts.Add("共享历史与日志");
+        summary.Text = busy ? activity : parts.Count > 0 ? string.Join("  +  ", parts) : "尚未选择清理内容";
+        var notes = new List<string>();
+        if (hidden > 0) notes.Add($"筛选外仍有 {hidden} 条已选");
+        if (recordOnly > 0) notes.Add($"{recordOnly} 条仅清理本地记录，保留原文件");
+        if (notes.Count == 0) notes.Add("先预览，再确认 · 项目、设置和云端记录不受影响");
+        selectionCount.Text = string.Join(" · ", notes);
+        selectionCount.ForeColor = hidden > 0 || recordOnly > 0 ? Color.FromArgb(152, 94, 19) : DesktopTheme.Muted;
+        tip.SetToolTip(summary, summary.Text);
+        tip.SetToolTip(selectionCount, selectionCount.Text);
+        var caps = state?.Capabilities;
+        var recoveryBlocked = state?.RecoveryIssues.Any(i => i.BlocksWrites) == true;
+        preview.Enabled = !busy && !recoveryBlocked && parts.Count > 0 && caps is not null && (selected.Count == 0 || caps.DeleteChats) && caps.ClearData;
+        preview.Text = busy ? "正在处理…" : "预览清理范围  →";
+        repair.Enabled = !busy && !recoveryBlocked && caps?.RepairReferences == true;
+        refresh.Enabled = search.Enabled = filter.Enabled = list.Enabled = !busy;
+        clearSearch.Enabled = !busy && search.TextLength > 0;
+        clearMemories.Enabled = clearShared.Enabled = !busy && !recoveryBlocked && caps?.ClearData == true;
+        selectAll.Enabled = !busy && selectable.Count > 0;
+        selectAll.Text = selectable.Count > 0 && selectable.All(c => selected.Contains(c.Id)) ? "取消结果选择" : "全选结果";
+        clearSelection.Enabled = !busy && selected.Count > 0;
+        downloadUpdate.Enabled = !busy;
+    }
+
+    private async Task Run(string label, Func<Task> action)
     {
         if (busy) return;
         busy = true;
+        activity = label;
         UseWaitCursor = true;
         RenderSelection();
         try { await action(); }
         catch (Exception e) when (e is CleanerException or IOException or UnauthorizedAccessException or Microsoft.Data.Sqlite.SqliteException)
         {
-            MessageBox.Show(this, e.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            if (!IsDisposed) MessageBox.Show(this, e.Message, "操作未完成", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally
         {
             busy = false;
-            UseWaitCursor = false;
-            RenderSelection();
+            if (!IsDisposed) { UseWaitCursor = false; RenderSelection(); }
         }
     }
 
-    private Task Reload() => Run(LoadState);
+    private Task Reload() => Run("正在读取本地会话…", LoadState);
 
     private async Task LoadState()
     {
-        var (snapshot, processState) = await Task.Run(() => (cleaner.Snapshot(), cleaner.CheckProcesses()));
+        Snapshot snapshot;
+        ProcessState process;
+        try { (snapshot, process) = await Task.Run(() => (cleaner.Snapshot(), cleaner.CheckProcesses())); }
+        catch
+        {
+            state = null;
+            selected.Clear();
+            RenderChats();
+            throw;
+        }
+        if (IsDisposed) return;
         state = snapshot;
-        selected.IntersectWith(snapshot.Chats.Where(c => c.CanDelete).Select(c => c.Id));
-        SetProcess(processState);
-        var warnings = snapshot.Warnings.Concat(snapshot.RecoveryIssues.Select(i =>
+        selected.IntersectWith(snapshot.Chats.Where(Selectable).Select(c => c.Id));
+        diagnostics = snapshot.Warnings.Concat(snapshot.RecoveryIssues.Select(i =>
             (i.BlocksWrites ? "上次操作异常中断，清理已锁定。故障材料：" : "上次操作的临时副本未能移除：") + i.Directory + (i.Error.Length > 0 ? "。" + i.Error : ""))).ToList();
-        alerts.Text = string.Join(Environment.NewLine, warnings);
-        alerts.Visible = warnings.Count > 0;
+        diagnosticsButton.Text = $"查看检查详情（{diagnostics.Count}）";
+        diagnosticsButton.Visible = diagnostics.Count > 0;
+        SetProcess(process);
         RenderChats();
+    }
+
+    private async Task RefreshProcessState()
+    {
+        if (busy || checkingProcess || IsDisposed) return;
+        checkingProcess = true;
+        try
+        {
+            var process = await Task.Run(cleaner.CheckProcesses);
+            if (!IsDisposed && !busy) SetProcess(process);
+        }
+        catch (Exception e)
+        {
+            if (!IsDisposed)
+            {
+                processTitle.Text = "暂时无法确认 Codex 运行状态";
+                processDetail.Text = "执行前会重新检查。";
+                processDot.ForeColor = Color.FromArgb(152, 94, 19);
+                tip.SetToolTip(processDetail, e.Message);
+            }
+        }
+        finally { checkingProcess = false; }
     }
 
     private void SetProcess(ProcessState process)
     {
-        var ready = !process.Running;
-        processBanner.BackColor = ready ? Color.FromArgb(237, 247, 240) : Color.FromArgb(255, 247, 232);
-        processDot.ForeColor = ready ? Color.FromArgb(22, 142, 82) : Color.FromArgb(204, 116, 19);
-        processTitle.Text = ready ? "Codex 已退出，可以执行清理" : "Codex 正在运行";
-        processDetail.Text = ready
-            ? $"数据目录：{cleaner.DataRoot}"
-            : "检测到 Codex 相关进程 · 退出后才能执行；现在可以浏览和预览。";
-        processTip.SetToolTip(processBanner, ready ? cleaner.DataRoot : string.Join(Environment.NewLine, process.Processes));
+        var ready = !process.Running && process.Processes.Count == 0;
+        processBanner.BackColor = ready ? Color.FromArgb(235, 247, 240) : Color.FromArgb(255, 246, 227);
+        processDot.ForeColor = ready ? Color.FromArgb(42, 133, 87) : Color.FromArgb(185, 119, 27);
+        processTitle.Text = ready ? "准备就绪" : "Codex 正在运行 · 当前可浏览和预览";
+        processDetail.Text = ready ? "Codex 已退出，可在核对预览后执行清理。" : "请在最终确认前退出 Codex，程序会自动检查运行状态。";
+        tip.SetToolTip(processTitle, ready ? "未检测到 Codex 相关进程。" : string.Join(Environment.NewLine, process.Processes));
+        tip.SetToolTip(processDetail, $"数据目录：{cleaner.DataRoot}");
     }
 
-    private void RenderChats()
+    private void ShowDiagnostics() => ShowTextDialog("本地检查详情", string.Join("\r\n\r\n", diagnostics.Select((d, i) => $"{i + 1}. {d}")));
+
+    private void ShowTextDialog(string title, string content)
     {
-        rendering = true;
-        list.BeginUpdate();
-        list.Items.Clear();
-        foreach (var chat in VisibleChats())
+        using var dialog = new Form { Text = title, StartPosition = FormStartPosition.CenterParent, Size = new Size(720, 460), MinimumSize = new Size(540, 340), Font = Font, BackColor = DesktopTheme.Canvas, MinimizeBox = false, MaximizeBox = false, ShowInTaskbar = false, Padding = new Padding(18) };
+        var text = new TextBox { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, WordWrap = true, BackColor = Color.White, ForeColor = DesktopTheme.Ink, Text = content, AccessibleName = title };
+        var close = DesktopTheme.Button("关闭");
+        close.Dock = DockStyle.Bottom;
+        close.DialogResult = DialogResult.Cancel;
+        dialog.Controls.Add(text);
+        dialog.Controls.Add(close);
+        dialog.CancelButton = close;
+        dialog.ShowDialog(this);
+    }
+
+    private Task PreviewCleanup() => Run("正在生成清理预览…", async () =>
+    {
+        var selection = new Selection([.. selected], clearMemories.Checked, clearShared.Checked)
         {
-            var note = chat.BlockedReason ?? (chat.RolloutMissing ? "会话文件已缺失，可清除残留索引" : chat.Archived ? "已归档" : "本地记录");
-            var item = new ListViewItem([chat.Title, chat.UpdatedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "—", note])
-            {
-                Tag = chat.Id,
-                Checked = selected.Contains(chat.Id),
-                ToolTipText = $"{chat.Title}\n{chat.Id}" + (chat.BlockedReason is null ? "" : "\n" + chat.BlockedReason),
-                ForeColor = chat.CanDelete ? Ink : Color.FromArgb(156, 163, 175),
-            };
-            list.Items.Add(item);
-        }
-        list.EndUpdate();
-        rendering = false;
-        emptyState.Text = search.TextLength == 0 ? "没有可显示的聊天记录" : "没有匹配的聊天\n试试缩短标题或 ID 关键词";
-        emptyState.Visible = list.Items.Count == 0;
-        ResizeChatColumn();
-        RenderSelectAll();
-        RenderSelection();
-    }
-
-    private void RenderSelectAll()
-    {
-        var selectable = VisibleChats().Where(c => c.CanDelete).ToList();
-        var allSelected = selectable.Count > 0 && selectable.All(c => selected.Contains(c.Id));
-        selectAll.Enabled = selectable.Count > 0 && !busy;
-        selectAll.Text = allSelected ? "取消本页选择" : "全选本页";
-    }
-
-    private void RenderSelection()
-    {
-        var items = new List<string>();
-        if (selected.Count > 0) items.Add($"{selected.Count} 个聊天");
-        if (clearMemories.Checked) items.Add("全部本地记忆");
-        if (clearShared.Checked) items.Add("共享输入历史与日志");
-        summary.Text = items.Count > 0 ? "本次清理：" + string.Join("  +  ", items) : $"共 {state?.Chats.Count ?? 0} 条聊天，尚未选择清理内容";
-        var visible = VisibleChats().ToList();
-        var deletableCount = visible.Count(c => c.CanDelete);
-        selectionCount.Text = $"当前显示 {visible.Count} 条 · 可选 {deletableCount} 条 · 已选 {visible.Count(c => selected.Contains(c.Id))} 条";
-        var caps = state?.Capabilities;
-        preview.Enabled = !busy && items.Count > 0 && caps is not null && (selected.Count == 0 || caps.DeleteChats) && caps.ClearData;
-        repair.Enabled = !busy && caps?.RepairReferences == true;
-        refresh.Enabled = search.Enabled = clearMemories.Enabled = clearShared.Enabled = list.Enabled = !busy;
-        selectAll.Enabled = !busy && deletableCount > 0;
-    }
-
-    private Task PreviewCleanup() => Run(async () =>
-    {
-        var selection = new Selection([.. selected], clearMemories.Checked, clearShared.Checked);
+            AllowRecordOnly = state?.Chats.Any(c => selected.Contains(c.Id) && c.CanRemoveRecord) == true,
+        };
         var plan = await Task.Run(() => cleaner.PlanCleanup(selection));
         if (!Confirm(plan)) return;
+        activity = "正在执行清理，请稍候…";
+        RenderSelection();
         var result = await Task.Run(() => cleaner.Execute(plan.Id));
         selected.Clear();
-        await Done(result, "所选内容已删除。");
+        clearMemories.Checked = clearShared.Checked = false;
+        await Done(result, plan.Chats.Any(c => c.CanRemoveRecord) ? "所选本地记录已清理。预览中标明保留的原会话文件未被删除。" : "所选内容已清理完成。");
     });
 
-    private Task PreviewRepair() => Run(async () =>
+    private Task PreviewRepair() => Run("正在检查失效引用…", async () =>
     {
         var plan = await Task.Run(cleaner.PlanRepair);
         if (plan.IsEmpty || (plan.ReferenceRepairs == 0 && plan.Files.Count == 0 && plan.DatabaseRows == 0))
         {
-            MessageBox.Show(this, "检查完成，没有发现可修复的失效引用。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show(this, "检查完成，没有发现可修复的失效引用。\n\n列表中的“仅清理记录”会话，可直接勾选后预览清理。", "检查完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
         if (!Confirm(plan)) return;
+        activity = "正在修复失效引用…";
+        RenderSelection();
         await Done(await Task.Run(() => cleaner.ExecuteRepair(plan.Id)), "失效引用已修复，可以重新启动 Codex 检查项目和归档。");
     });
 
     private bool Confirm(Plan plan)
     {
-        using var dialog = new ConfirmDialog(plan, cleaner.CheckProcesses);
-        return dialog.ShowDialog(this) == DialogResult.OK;
+        UseWaitCursor = false;
+        try { using var dialog = new ConfirmDialog(plan, cleaner.CheckProcesses); return dialog.ShowDialog(this) == DialogResult.OK; }
+        finally { if (!IsDisposed) UseWaitCursor = true; }
     }
 
     private async Task Done(ExecuteResult result, string message)
     {
         if (result.ResidualDirectory is not null) message += $"\n\n临时事务副本未能完全删除：{result.ResidualDirectory}\n{result.ResidualError}";
         await LoadState();
-        MessageBox.Show(this, message, Text, MessageBoxButtons.OK, result.ResidualDirectory is null ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+        MessageBox.Show(this, message, "处理完成", MessageBoxButtons.OK, result.ResidualDirectory is null ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing && !IsDisposed)
+        {
+            updateCancellation.Cancel();
+            updateCancellation.Dispose();
+            processTimer.Stop();
+            processTimer.Dispose();
+            tip.Dispose();
+        }
+        base.Dispose(disposing);
+    }
+
+    private sealed class BufferedGrid : DataGridView
+    {
+        public BufferedGrid() { DoubleBuffered = true; }
     }
 }
