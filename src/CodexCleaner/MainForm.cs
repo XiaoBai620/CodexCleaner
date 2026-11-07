@@ -14,21 +14,21 @@ internal sealed class MainForm : Form
     private readonly Action<Uri> openReleasePage;
     private readonly CancellationTokenSource updateCancellation = new();
     private readonly Button checkUpdates = DesktopTheme.Button("检查更新");
-    private readonly Button downloadUpdate = DesktopTheme.Button("前往更新", primary: true);
+    private readonly Button downloadUpdate = DesktopTheme.Button("前往更新");
     private readonly Label updateNotice = DesktopTheme.Label("", 9.5f, true);
-    private readonly Panel updateBanner = new() { Dock = DockStyle.Fill, Padding = new Padding(14, 6, 14, 6), Margin = new Padding(0, 8, 0, 0), BackColor = Color.FromArgb(230, 239, 255), Visible = false };
+    private readonly Panel updateBanner = new() { Dock = DockStyle.Fill, Padding = new Padding(14, 6, 14, 6), Margin = new Padding(0, 8, 0, 0), BackColor = Color.FromArgb(239, 239, 234), Visible = false };
     private readonly RowStyle updateRowStyle = new(SizeType.Absolute, 0);
     private AvailableUpdate? availableUpdate;
     private bool checkingUpdate;
     private readonly HashSet<string> selected = [];
-    private readonly Label processTitle = DesktopTheme.Label("正在检查本地状态", 9.5f, true);
+    private readonly Label processTitle = DesktopTheme.Label("正在检查本地状态", 9f);
     private readonly Label processDetail = DesktopTheme.Label("请稍候…", 8.5f);
     private readonly Label processDot = DesktopTheme.Label("●", 14f, true);
-    private readonly Panel processBanner = new() { Dock = DockStyle.Fill, Padding = new Padding(14, 8, 14, 8), Margin = new Padding(0, 10, 0, 10) };
+    private readonly Panel processBanner = new() { Dock = DockStyle.Fill, Padding = Padding.Empty, Margin = new Padding(24, 0, 12, 0), BackColor = Color.Transparent };
     private readonly Button diagnosticsButton = DesktopTheme.Button("查看检查详情");
-    private readonly TextBox search = new() { PlaceholderText = "搜索标题或会话 ID", Dock = DockStyle.Fill, BorderStyle = BorderStyle.None, Font = new Font("Microsoft YaHei UI", 10f), AccessibleName = "搜索标题或会话 ID" };
-    private readonly Button clearSearch = DesktopTheme.Button("×");
-    private readonly ComboBox filter = new() { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat, Font = new Font("Microsoft YaHei UI", 9f), AccessibleName = "筛选会话状态" };
+    private readonly TextBox search = new() { PlaceholderText = "搜索标题或会话 ID", BorderStyle = BorderStyle.None, Font = new Font("Microsoft YaHei UI", 9.5f), AccessibleName = "搜索标题或会话 ID" };
+    private readonly Button clearSearch = new ClearSearchButton();
+    private readonly ComboBox filter = new FilterComboBox { Anchor = AnchorStyles.Left | AnchorStyles.Right, Font = new Font("Microsoft YaHei UI", 9f), AccessibleName = "筛选会话状态" };
     private readonly DataGridView list = new BufferedGrid();
     private readonly Label listCount = DesktopTheme.Label("读取中", 8.5f);
     private readonly Label emptyState = DesktopTheme.Label("正在读取会话…", 10f);
@@ -71,25 +71,23 @@ internal sealed class MainForm : Form
         Font = new Font("Microsoft YaHei UI", 9f);
         KeyPreview = true;
 
-        var root = CreateLayout(1, 5);
-        root.Padding = new Padding(20, 16, 20, 14);
+        var root = CreateLayout(1, 4);
+        root.Padding = new Padding(20, 8, 20, 14);
         root.BackColor = DesktopTheme.Canvas;
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 78));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
         root.RowStyles.Add(updateRowStyle);
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 76));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 82));
         root.Controls.Add(BuildMasthead(version), 0, 0);
         root.Controls.Add(BuildUpdateBanner(), 0, 1);
-        root.Controls.Add(BuildProcessBanner(), 0, 2);
         var body = CreateLayout(2, 1);
         body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 68));
         body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 32));
         body.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         body.Controls.Add(BuildListPanel(), 0, 0);
         body.Controls.Add(BuildSidebar(), 1, 0);
-        root.Controls.Add(body, 0, 3);
-        root.Controls.Add(BuildFooter(), 0, 4);
+        root.Controls.Add(body, 0, 2);
+        root.Controls.Add(BuildFooter(), 0, 3);
         Controls.Add(root);
 
         filter.Items.AddRange(["全部会话", "可清理", "仅清理记录", "受保护", "已归档"]);
@@ -168,39 +166,24 @@ internal sealed class MainForm : Form
     private Control BuildMasthead(Version version)
     {
         var header = CreateLayout(4, 1);
-        header.BackColor = DesktopTheme.Navy;
-        header.Padding = new Padding(18, 12, 18, 12);
-        header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 52));
+        header.Padding = new Padding(0, 0, 0, 8);
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 86));
         header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         header.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        var brand = DesktopTheme.Label("C", 22f, true);
-        brand.BackColor = DesktopTheme.Accent;
-        brand.ForeColor = Color.White;
-        brand.Dock = DockStyle.Fill;
-        brand.TextAlign = ContentAlignment.MiddleCenter;
-        brand.Margin = new Padding(0, 0, 12, 0);
-        header.Controls.Add(brand, 0, 0);
-        var text = CreateLayout(1, 2);
-        text.RowStyles.Add(new RowStyle(SizeType.Percent, 58));
-        text.RowStyles.Add(new RowStyle(SizeType.Percent, 42));
-        var title = DesktopTheme.Label("Codex 本地清理台", 17f, true);
-        title.ForeColor = Color.White;
-        title.Dock = DockStyle.Fill;
-        var subtitle = DesktopTheme.Label("让本地记录，重新井然有序。", 8.5f);
-        subtitle.ForeColor = Color.FromArgb(178, 192, 214);
-        subtitle.Dock = DockStyle.Fill;
-        text.Controls.Add(title, 0, 0);
-        text.Controls.Add(subtitle, 0, 1);
-        header.Controls.Add(text, 1, 0);
-        var badge = DesktopTheme.Label($"本地模式\n v{version.Major}.{version.Minor}.{version.Build}", 8.5f, true);
-        badge.ForeColor = Color.FromArgb(193, 207, 228);
-        badge.Dock = DockStyle.Fill;
-        badge.TextAlign = ContentAlignment.MiddleRight;
-        header.Controls.Add(badge, 2, 0);
+        var title = DesktopTheme.Label("CodexCleaner", 11.5f, true);
+        title.AutoSize = true;
+        title.Anchor = AnchorStyles.Left;
+        header.Controls.Add(title, 0, 0);
+        var badge = DesktopTheme.Label($"v{version.Major}.{version.Minor}.{version.Build}", 8f);
+        badge.AutoSize = true;
+        badge.Anchor = AnchorStyles.Left;
+        badge.Margin = new Padding(10, 0, 0, 0);
+        header.Controls.Add(badge, 1, 0);
+        header.Controls.Add(BuildProcessBanner(), 2, 0);
         checkUpdates.Anchor = AnchorStyles.Right;
-        checkUpdates.Margin = new Padding(14, 0, 0, 0);
+        checkUpdates.Margin = Padding.Empty;
         header.Controls.Add(checkUpdates, 3, 0);
         return header;
     }
@@ -269,44 +252,46 @@ internal sealed class MainForm : Form
 
     private Control BuildProcessBanner()
     {
-        processBanner.BackColor = Color.FromArgb(236, 241, 248);
-        var row = CreateLayout(3, 1);
-        row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 28));
+        var row = CreateLayout(4, 1);
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 16));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         row.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         processDot.Dock = DockStyle.Fill;
         processDot.TextAlign = ContentAlignment.MiddleLeft;
         row.Controls.Add(processDot, 0, 0);
-        var text = CreateLayout(1, 2);
-        text.RowStyles.Add(new RowStyle(SizeType.Percent, 52));
-        text.RowStyles.Add(new RowStyle(SizeType.Percent, 48));
-        processTitle.Dock = processDetail.Dock = DockStyle.Fill;
-        processTitle.AutoEllipsis = processDetail.AutoEllipsis = true;
-        text.Controls.Add(processTitle, 0, 0);
-        text.Controls.Add(processDetail, 0, 1);
-        row.Controls.Add(text, 1, 0);
+        processTitle.AutoSize = true;
+        processTitle.Anchor = AnchorStyles.Left;
+        processTitle.Margin = new Padding(0, 0, 12, 0);
+        processDetail.Dock = DockStyle.Fill;
+        processDetail.TextAlign = ContentAlignment.MiddleLeft;
+        processDetail.AutoEllipsis = true;
+        row.Controls.Add(processTitle, 1, 0);
+        row.Controls.Add(processDetail, 2, 0);
         diagnosticsButton.Visible = false;
         diagnosticsButton.Anchor = AnchorStyles.Right;
-        row.Controls.Add(diagnosticsButton, 2, 0);
+        diagnosticsButton.Padding = new Padding(7, 2, 7, 2);
+        diagnosticsButton.Font = new Font("Microsoft YaHei UI", 8f);
+        row.Controls.Add(diagnosticsButton, 3, 0);
         processBanner.Controls.Add(row);
         return processBanner;
     }
 
     private Control BuildListPanel()
     {
-        var card = new SurfacePanel { Dock = DockStyle.Fill, Padding = new Padding(15, 12, 15, 8), Margin = new Padding(0, 0, 12, 0) };
+        var card = new SurfacePanel { Dock = DockStyle.Fill, Padding = new Padding(15, 12, 15, 8), Margin = new Padding(0, 0, 12, 0), CornerRadius = 8 };
         var panel = CreateLayout(1, 4);
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 39));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 43));
-        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 43));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
+        panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
         panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         var titleRow = CreateLayout(3, 1);
-        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 72));
+        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 60));
         titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         titleRow.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        var title = DesktopTheme.Label("会话", 12f, true);
+        var title = DesktopTheme.Label("会话", 11f, true);
         title.Dock = DockStyle.Fill;
         title.TextAlign = ContentAlignment.MiddleLeft;
         listCount.Dock = DockStyle.Fill;
@@ -320,30 +305,11 @@ internal sealed class MainForm : Form
 
         var searchRow = CreateLayout(2, 1);
         searchRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        searchRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 143));
+        searchRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 152));
         searchRow.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        var searchFrame = new SurfacePanel { Dock = DockStyle.Fill, Padding = new Padding(11, 6, 3, 4), Margin = new Padding(0, 2, 10, 4), BorderColor = DesktopTheme.Border };
-        var searchInner = CreateLayout(3, 1);
-        searchInner.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 39));
-        searchInner.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        searchInner.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 26));
-        searchInner.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        search.Margin = Padding.Empty;
-        clearSearch.AutoSize = false;
-        clearSearch.Dock = DockStyle.Fill;
-        clearSearch.Padding = clearSearch.Margin = Padding.Empty;
-        clearSearch.FlatAppearance.BorderSize = 0;
-        clearSearch.Font = new Font("Segoe UI", 12f);
-        clearSearch.AccessibleName = "清除搜索";
-        var searchLabel = DesktopTheme.Label("搜索", 8.5f);
-        searchLabel.Dock = DockStyle.Fill;
-        searchLabel.TextAlign = ContentAlignment.MiddleLeft;
-        searchInner.Controls.Add(searchLabel, 0, 0);
-        searchInner.Controls.Add(search, 1, 0);
-        searchInner.Controls.Add(clearSearch, 2, 0);
-        searchFrame.Controls.Add(searchInner);
+        var searchFrame = new SearchField(search, clearSearch) { Dock = DockStyle.Fill, Margin = new Padding(0, 2, 10, 6) };
         searchRow.Controls.Add(searchFrame, 0, 0);
-        filter.Margin = new Padding(0, 7, 0, 0);
+        filter.Margin = new Padding(0, 2, 0, 6);
         searchRow.Controls.Add(filter, 1, 0);
         panel.Controls.Add(searchRow, 0, 1);
 
@@ -351,11 +317,11 @@ internal sealed class MainForm : Form
         actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         actions.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         actions.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        var selectionActions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = Padding.Empty, Padding = new Padding(0, 2, 0, 0), BackColor = Color.Transparent };
+        var selectionActions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = Padding.Empty, Padding = Padding.Empty, BackColor = Color.Transparent };
         selectAll.Margin = new Padding(0, 0, 7, 0);
         selectionActions.Controls.Add(selectAll);
         selectionActions.Controls.Add(clearSelection);
-        repair.Anchor = AnchorStyles.Right;
+        repair.Anchor = AnchorStyles.Right | AnchorStyles.Top;
         actions.Controls.Add(selectionActions, 0, 0);
         actions.Controls.Add(repair, 1, 0);
         panel.Controls.Add(actions, 0, 2);
@@ -379,13 +345,13 @@ internal sealed class MainForm : Form
         list.BackgroundColor = Color.White;
         list.BorderStyle = BorderStyle.None;
         list.CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal;
-        list.GridColor = Color.FromArgb(238, 242, 247);
+        list.GridColor = Color.FromArgb(240, 240, 236);
         list.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None;
         list.EnableHeadersVisualStyles = false;
         list.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
         list.ColumnHeadersHeight = 36;
-        list.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle { BackColor = Color.FromArgb(247, 249, 252), ForeColor = DesktopTheme.Muted, Font = new Font("Microsoft YaHei UI", 8.5f), SelectionBackColor = Color.FromArgb(247, 249, 252), Padding = new Padding(5, 0, 0, 0) };
-        list.DefaultCellStyle = new DataGridViewCellStyle { BackColor = Color.White, ForeColor = DesktopTheme.Ink, Font = new Font("Microsoft YaHei UI", 9.5f), SelectionBackColor = Color.FromArgb(235, 242, 255), SelectionForeColor = DesktopTheme.Ink, Padding = new Padding(5, 0, 0, 0) };
+        list.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle { BackColor = Color.FromArgb(249, 249, 247), ForeColor = DesktopTheme.Muted, Font = new Font("Microsoft YaHei UI", 8.5f), SelectionBackColor = Color.FromArgb(249, 249, 247), Padding = new Padding(5, 0, 0, 0) };
+        list.DefaultCellStyle = new DataGridViewCellStyle { BackColor = Color.White, ForeColor = DesktopTheme.Ink, Font = new Font("Microsoft YaHei UI", 9.5f), SelectionBackColor = Color.FromArgb(241, 241, 235), SelectionForeColor = DesktopTheme.Ink, Padding = new Padding(5, 0, 0, 0) };
         list.RowTemplate.Height = 43;
         list.RowHeadersVisible = false;
         list.ReadOnly = true;
@@ -407,7 +373,7 @@ internal sealed class MainForm : Form
         var sidebar = CreateLayout(1, 2);
         sidebar.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         sidebar.RowStyles.Add(new RowStyle(SizeType.Absolute, 187));
-        var detailCard = new SurfacePanel { Dock = DockStyle.Fill, Padding = new Padding(16, 12, 12, 13), Margin = new Padding(0, 0, 0, 12) };
+        var detailCard = new SurfacePanel { Dock = DockStyle.Fill, Padding = new Padding(16, 12, 12, 13), Margin = new Padding(0, 0, 0, 12), CornerRadius = 8 };
         var detailLayout = CreateLayout(1, 3);
         detailLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         detailLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
@@ -417,12 +383,11 @@ internal sealed class MainForm : Form
         detailHeading.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         detailHeading.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         detailHeading.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        var detailTitle = DesktopTheme.Label("会话详情", 11f, true);
+        var detailTitle = DesktopTheme.Label("会话详情", 10f, true);
         detailTitle.Dock = DockStyle.Fill;
         detailTitle.TextAlign = ContentAlignment.MiddleLeft;
         copyDetails.Anchor = AnchorStyles.Right;
-        copyDetails.Font = new Font("Microsoft YaHei UI", 8f);
-        copyDetails.Padding = new Padding(6, 3, 6, 3);
+        copyDetails.Padding = new Padding(8, 4, 8, 4);
         expandDetails.Anchor = AnchorStyles.Right;
         expandDetails.Font = copyDetails.Font;
         expandDetails.Padding = copyDetails.Padding;
@@ -441,7 +406,7 @@ internal sealed class MainForm : Form
         detailCard.Controls.Add(detailLayout);
         sidebar.Controls.Add(detailCard, 0, 0);
 
-        var options = new SurfacePanel { Dock = DockStyle.Fill, Padding = new Padding(16, 12, 16, 11), Margin = Padding.Empty };
+        var options = new SurfacePanel { Dock = DockStyle.Fill, Padding = new Padding(16, 12, 16, 11), Margin = Padding.Empty, CornerRadius = 8 };
         var optionLayout = CreateLayout(1, 6);
         optionLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 25));
         optionLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
@@ -449,7 +414,7 @@ internal sealed class MainForm : Form
         optionLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 23));
         optionLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 25));
         optionLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        var optionTitle = DesktopTheme.Label("附加清理", 11f, true);
+        var optionTitle = DesktopTheme.Label("附加清理", 10f, true);
         optionTitle.Dock = DockStyle.Fill;
         optionLayout.Controls.Add(optionTitle, 0, 0);
         var optionHint = DesktopTheme.Label("可选 · 以下范围涉及所有聊天", 8f);
@@ -487,7 +452,7 @@ internal sealed class MainForm : Form
         description.Controls.Add(summary, 0, 0);
         description.Controls.Add(selectionCount, 0, 1);
         footer.Controls.Add(description, 0, 0);
-        preview.Padding = new Padding(23, 11, 23, 11);
+        preview.Padding = new Padding(20, 10, 20, 10);
         preview.Margin = new Padding(16, 0, 0, 0);
         preview.Anchor = AnchorStyles.Right | AnchorStyles.Top;
         footer.Controls.Add(preview, 1, 0);
@@ -649,6 +614,7 @@ internal sealed class MainForm : Form
         repair.Enabled = !busy && !recoveryBlocked && caps?.RepairReferences == true;
         refresh.Enabled = search.Enabled = filter.Enabled = list.Enabled = !busy;
         clearSearch.Enabled = !busy && search.TextLength > 0;
+        clearSearch.Visible = search.TextLength > 0;
         clearMemories.Enabled = clearShared.Enabled = !busy && !recoveryBlocked && caps?.ClearData == true;
         selectAll.Enabled = !busy && selectable.Count > 0;
         selectAll.Text = selectable.Count > 0 && selectable.All(c => selected.Contains(c.Id)) ? "取消结果选择" : "全选结果";
@@ -713,7 +679,7 @@ internal sealed class MainForm : Form
         {
             if (!IsDisposed)
             {
-                processTitle.Text = "暂时无法确认 Codex 运行状态";
+                processTitle.Text = "状态待确认";
                 processDetail.Text = "执行前会重新检查。";
                 processDot.ForeColor = Color.FromArgb(152, 94, 19);
                 tip.SetToolTip(processDetail, e.Message);
@@ -725,12 +691,11 @@ internal sealed class MainForm : Form
     private void SetProcess(ProcessState process)
     {
         var ready = !process.Running && process.Processes.Count == 0;
-        processBanner.BackColor = ready ? Color.FromArgb(235, 247, 240) : Color.FromArgb(255, 246, 227);
         processDot.ForeColor = ready ? Color.FromArgb(42, 133, 87) : Color.FromArgb(185, 119, 27);
-        processTitle.Text = ready ? "准备就绪" : "Codex 正在运行 · 当前可浏览和预览";
-        processDetail.Text = ready ? "Codex 已退出，可在核对预览后执行清理。" : "请在最终确认前退出 Codex，程序会自动检查运行状态。";
+        processTitle.Text = ready ? "准备就绪" : "Codex 正在运行";
+        processDetail.Text = ready ? "核对预览后即可清理" : "预览可用 · 清理前退出 Codex";
         tip.SetToolTip(processTitle, ready ? "未检测到 Codex 相关进程。" : string.Join(Environment.NewLine, process.Processes));
-        tip.SetToolTip(processDetail, $"数据目录：{cleaner.DataRoot}");
+        tip.SetToolTip(processDetail, $"{processDetail.Text}。程序会自动复查运行状态。\n数据目录：{cleaner.DataRoot}");
     }
 
     private void ShowDiagnostics() => ShowTextDialog("本地检查详情", string.Join("\r\n\r\n", diagnostics.Select((d, i) => $"{i + 1}. {d}")));
