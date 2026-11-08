@@ -17,7 +17,7 @@ public sealed class ConfirmDialogTests
         using var dialog = new ConfirmDialog(SyntheticPlan(), () => new ProcessState(false, []));
         Assert.False(Field<Button>(dialog, "confirm").Enabled);
         Assert.Null(dialog.AcceptButton);
-        var cancel = Assert.IsType<Button>(dialog.CancelButton);
+        var cancel = Assert.IsAssignableFrom<Button>(dialog.CancelButton);
         Assert.Equal(DialogResult.Cancel, cancel.DialogResult);
         Assert.Same(cancel, dialog.ActiveControl);
         Assert.Equal(DialogResult.None, dialog.DialogResult);

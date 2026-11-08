@@ -18,12 +18,12 @@ internal sealed class ChatView : Control
     private static readonly Font NoteBold = new("Microsoft YaHei UI", 9f, FontStyle.Bold);
     private static readonly Font ThinkingFont = new("Microsoft YaHei UI", 9f, FontStyle.Italic);
     private static readonly Font CaptionFont = new("Microsoft YaHei UI", 8.5f);
-    private static readonly Color UserFill = Color.FromArgb(242, 242, 242);
-    private static readonly Color CodeFill = Color.FromArgb(245, 245, 245);
-    private static readonly Color InlineCodeFill = Color.FromArgb(238, 238, 238);
-    private static readonly Color Highlight = Color.FromArgb(200, 220, 252);
-    private static readonly Color SystemFill = Color.FromArgb(254, 249, 238);
-    private static readonly Color SystemInk = Color.FromArgb(146, 92, 14);
+    private static readonly Color UserFill = DesktopTheme.Hover;
+    private static readonly Color CodeFill = DesktopTheme.Canvas;
+    private static readonly Color InlineCodeFill = DesktopTheme.Hover;
+    private static readonly Color Highlight = DesktopTheme.Selection;
+    private static readonly Color SystemFill = DesktopTheme.Canvas;
+    private static readonly Color SystemInk = DesktopTheme.Muted;
 
     private enum Kind { User, Assistant, Thinking, Tool, System }
 
@@ -173,7 +173,7 @@ internal sealed class ChatView : Control
     private static readonly TextStyle Note = new(NoteFont, DesktopTheme.Muted);
     private static readonly TextStyle NoteStrong = new(NoteBold, DesktopTheme.Accent);
     private static readonly TextStyle Heading = new(CaptionFont, DesktopTheme.Faint);
-    private static readonly TextStyle Link = new(NoteFont, Color.FromArgb(37, 99, 235));
+    private static readonly TextStyle Link = new(NoteFont, DesktopTheme.Link);
     private static readonly TextStyle Code = new(Markdown.CodeFont, Markdown.CodeInk, true);
 
     private static IEnumerable<Paragraph> CodeLines(string text) =>
@@ -471,7 +471,7 @@ internal sealed class ChatView : Control
         var open = IsOpen(b);
         var (fill, border, radius) = b.Kind switch
         {
-            Kind.User => (UserFill, Color.Empty, 16f),
+            Kind.User => (UserFill, Color.Empty, 18f),
             Kind.System => (SystemFill, Color.Empty, 10f),
             Kind.Tool or Kind.Thinking when open => (Color.White, DesktopTheme.Border, 10f),
             Kind.Tool or Kind.Thinking when hover => (DesktopTheme.Hover, Color.Empty, 8f),

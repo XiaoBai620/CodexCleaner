@@ -14,7 +14,7 @@ internal sealed record Paragraph(IReadOnlyList<Run> Runs, bool Code = false, boo
 internal static partial class Markdown
 {
     public static readonly Font CodeFont = new("Consolas", 9f);
-    public static readonly Color CodeInk = Color.FromArgb(55, 65, 81);
+    public static readonly Color CodeInk = DesktopTheme.Code;
     private static readonly Font[] HeadingFonts = [new("Microsoft YaHei UI", 12f, FontStyle.Bold), new("Microsoft YaHei UI", 11f, FontStyle.Bold), new("Microsoft YaHei UI", 10f, FontStyle.Bold)];
     private static readonly Dictionary<Font, Font> BoldFonts = [];
     private static readonly TextStyle Code = new(CodeFont, CodeInk, true);

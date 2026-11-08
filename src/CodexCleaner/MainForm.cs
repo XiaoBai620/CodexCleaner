@@ -16,7 +16,7 @@ internal sealed class MainForm : Form
     private readonly Button checkUpdates = DesktopTheme.Button("检查更新");
     private readonly Button downloadUpdate = DesktopTheme.Button("前往更新");
     private readonly Label updateNotice = DesktopTheme.Label("", 9.5f, true);
-    private readonly Panel updateBanner = new() { Dock = DockStyle.Fill, Padding = new Padding(14, 6, 14, 6), Margin = new Padding(0, 8, 0, 0), BackColor = Color.FromArgb(239, 239, 234), Visible = false };
+    private readonly Panel updateBanner = new() { Dock = DockStyle.Fill, Padding = new Padding(14, 6, 14, 6), Margin = new Padding(0, 8, 0, 0), BackColor = DesktopTheme.Hover, Visible = false };
     private readonly RowStyle updateRowStyle = new(SizeType.Absolute, 0);
     private AvailableUpdate? availableUpdate;
     private bool checkingUpdate;
@@ -170,26 +170,29 @@ internal sealed class MainForm : Form
 
     private Control BuildMasthead(Version version)
     {
-        var header = CreateLayout(4, 1);
+        var header = CreateLayout(5, 1);
         header.Padding = new Padding(0, 0, 0, 8);
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 36));
         header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         header.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        var logo = new PictureBox { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, Margin = new Padding(0, 4, 8, 4), BackColor = Color.Transparent, Image = DesktopTheme.Logo(64) };
+        header.Controls.Add(logo, 0, 0);
         var title = DesktopTheme.Label("CodexCleaner", 11.5f, true);
         title.AutoSize = true;
         title.Anchor = AnchorStyles.Left;
-        header.Controls.Add(title, 0, 0);
+        header.Controls.Add(title, 1, 0);
         var badge = DesktopTheme.Label($"v{version.Major}.{version.Minor}.{version.Build}", 8f);
         badge.AutoSize = true;
         badge.Anchor = AnchorStyles.Left;
         badge.Margin = new Padding(10, 0, 0, 0);
-        header.Controls.Add(badge, 1, 0);
-        header.Controls.Add(BuildProcessBanner(), 2, 0);
+        header.Controls.Add(badge, 2, 0);
+        header.Controls.Add(BuildProcessBanner(), 3, 0);
         checkUpdates.Anchor = AnchorStyles.Right;
         checkUpdates.Margin = Padding.Empty;
-        header.Controls.Add(checkUpdates, 3, 0);
+        header.Controls.Add(checkUpdates, 4, 0);
         return header;
     }
 
@@ -285,7 +288,7 @@ internal sealed class MainForm : Form
 
     private Control BuildListPanel()
     {
-        var card = new SurfacePanel { Dock = DockStyle.Fill, Padding = new Padding(15, 12, 15, 8), Margin = new Padding(0, 0, 12, 0), CornerRadius = 8 };
+        var card = new SurfacePanel { Dock = DockStyle.Fill, Padding = new Padding(15, 12, 15, 8), Margin = new Padding(0, 0, 12, 0), CornerRadius = 16 };
         var panel = CreateLayout(1, 4);
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
@@ -350,13 +353,13 @@ internal sealed class MainForm : Form
         list.BackgroundColor = Color.White;
         list.BorderStyle = BorderStyle.None;
         list.CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal;
-        list.GridColor = Color.FromArgb(240, 240, 236);
+        list.GridColor = DesktopTheme.Hover;
         list.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None;
         list.EnableHeadersVisualStyles = false;
         list.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
         list.ColumnHeadersHeight = 36;
-        list.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle { BackColor = Color.FromArgb(249, 249, 247), ForeColor = DesktopTheme.Muted, Font = new Font("Microsoft YaHei UI", 8.5f), SelectionBackColor = Color.FromArgb(249, 249, 247), Padding = new Padding(5, 0, 0, 0) };
-        list.DefaultCellStyle = new DataGridViewCellStyle { BackColor = Color.White, ForeColor = DesktopTheme.Ink, Font = new Font("Microsoft YaHei UI", 9.5f), SelectionBackColor = Color.FromArgb(241, 241, 235), SelectionForeColor = DesktopTheme.Ink, Padding = new Padding(5, 0, 0, 0) };
+        list.ColumnHeadersDefaultCellStyle = new DataGridViewCellStyle { BackColor = Color.White, ForeColor = DesktopTheme.Faint, Font = new Font("Microsoft YaHei UI", 8.5f), SelectionBackColor = Color.White, Padding = new Padding(5, 0, 0, 0) };
+        list.DefaultCellStyle = new DataGridViewCellStyle { BackColor = Color.White, ForeColor = DesktopTheme.Ink, Font = new Font("Microsoft YaHei UI", 9.5f), SelectionBackColor = DesktopTheme.Hover, SelectionForeColor = DesktopTheme.Ink, Padding = new Padding(5, 0, 0, 0) };
         list.RowTemplate.Height = 43;
         list.RowHeadersVisible = false;
         list.ReadOnly = true;
@@ -392,7 +395,7 @@ internal sealed class MainForm : Form
         var sidebar = CreateLayout(1, 2);
         sidebar.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         sidebar.RowStyles.Add(new RowStyle(SizeType.Absolute, 187));
-        var detailCard = new SurfacePanel { Dock = DockStyle.Fill, Padding = new Padding(16, 12, 12, 13), Margin = new Padding(0, 0, 0, 12), CornerRadius = 8 };
+        var detailCard = new SurfacePanel { Dock = DockStyle.Fill, Padding = new Padding(16, 12, 12, 13), Margin = new Padding(0, 0, 0, 12), CornerRadius = 16 };
         var detailLayout = CreateLayout(1, 3);
         detailLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         detailLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
@@ -431,7 +434,7 @@ internal sealed class MainForm : Form
         detailCard.Controls.Add(detailLayout);
         sidebar.Controls.Add(detailCard, 0, 0);
 
-        var options = new SurfacePanel { Dock = DockStyle.Fill, Padding = new Padding(16, 12, 16, 11), Margin = Padding.Empty, CornerRadius = 8 };
+        var options = new SurfacePanel { Dock = DockStyle.Fill, Padding = new Padding(16, 12, 16, 11), Margin = Padding.Empty, CornerRadius = 16 };
         var optionLayout = CreateLayout(1, 6);
         optionLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 25));
         optionLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
@@ -497,12 +500,11 @@ internal sealed class MainForm : Form
     private static string StatusText(ChatInfo chat) => chat.InUse ? "使用中" : chat.CanRemoveRecord ? "仅清理记录" : !chat.CanDelete ? "受保护" : chat.RolloutMissing ? "文件已缺失" : chat.Archived ? "已归档" : "本地会话";
 
     private static (Color Ink, Color Fill) StatusColors(ChatInfo chat) => chat.InUse
-        ? (Color.FromArgb(37, 99, 235), Color.FromArgb(232, 240, 254))
-        : chat.CanRemoveRecord || chat.RolloutMissing
-        ? (Color.FromArgb(152, 94, 19), Color.FromArgb(255, 246, 224))
-        : !chat.CanDelete ? (Color.FromArgb(140, 66, 66), Color.FromArgb(253, 237, 237))
-        : chat.Archived ? (Color.FromArgb(112, 84, 158), Color.FromArgb(244, 239, 252))
-        : (Color.FromArgb(42, 107, 92), Color.FromArgb(234, 247, 241));
+        ? (DesktopTheme.Ink, DesktopTheme.Pressed)
+        : chat.CanRemoveRecord || chat.RolloutMissing ? (DesktopTheme.Warning, DesktopTheme.Hover)
+        : !chat.CanDelete ? (DesktopTheme.Danger, DesktopTheme.Hover)
+        : chat.Archived ? (DesktopTheme.Muted, DesktopTheme.Hover)
+        : (DesktopTheme.Green, DesktopTheme.GreenFill);
 
     private void PaintStatus(object? sender, DataGridViewCellPaintingEventArgs e)
     {
@@ -515,7 +517,7 @@ internal sealed class MainForm : Form
         if (pill.Width > 0 && pill.Height > 0)
         {
             using var brush = new SolidBrush(fill);
-            using var path = DesktopTheme.RoundedRect(pill, 5 * scale);
+            using var path = DesktopTheme.RoundedRect(pill, pill.Height / 2f);
             e.Graphics.FillPath(brush, path);
             TextRenderer.DrawText(e.Graphics, StatusText(chat), e.CellStyle?.Font ?? list.Font, pill, ink, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
         }
@@ -647,7 +649,7 @@ internal sealed class MainForm : Form
         if (codexRunning && selected.Count > 0) notes.Add("Codex 运行中：界面引用待退出后修复");
         if (notes.Count == 0) notes.Add("先预览，再确认 · 项目、设置和云端记录不受影响");
         selectionCount.Text = string.Join(" · ", notes);
-        selectionCount.ForeColor = hidden > 0 || recordOnly > 0 ? Color.FromArgb(152, 94, 19) : DesktopTheme.Muted;
+        selectionCount.ForeColor = hidden > 0 || recordOnly > 0 ? DesktopTheme.Warning : DesktopTheme.Muted;
         tip.SetToolTip(summary, summary.Text);
         tip.SetToolTip(selectionCount, selectionCount.Text);
         var caps = state?.Capabilities;
@@ -758,7 +760,7 @@ internal sealed class MainForm : Form
             {
                 processTitle.Text = "状态待确认";
                 processDetail.Text = "执行前会重新检查。";
-                processDot.ForeColor = Color.FromArgb(152, 94, 19);
+                processDot.ForeColor = DesktopTheme.Warning;
                 tip.SetToolTip(processDetail, e.Message);
             }
         }
@@ -771,7 +773,7 @@ internal sealed class MainForm : Form
         var ready = !process.Running && process.Processes.Count == 0;
         var changed = codexRunning == ready;
         codexRunning = !ready;
-        processDot.ForeColor = ready ? Color.FromArgb(42, 133, 87) : Color.FromArgb(37, 99, 235);
+        processDot.ForeColor = ready ? DesktopTheme.Green : DesktopTheme.Ink;
         processTitle.Text = ready ? "准备就绪" : "Codex 正在运行";
         processDetail.Text = ready ? "核对预览后即可清理" : "可删除未在使用的聊天 · 全局清理需先退出";
         tip.SetToolTip(processTitle, ready ? "未检测到 Codex 相关进程。" : string.Join(Environment.NewLine, process.Processes));

@@ -2,17 +2,37 @@ using System.Drawing.Drawing2D;
 
 namespace CodexCleaner;
 
+// ChatGPT-style palette: white surfaces on a near-white canvas, near-black ink and pill
+// buttons, hairline borders, and the ChatGPT green only for "ready" states.
 internal static class DesktopTheme
 {
-    public static readonly Color Ink = Color.FromArgb(40, 40, 39);
-    public static readonly Color Muted = Color.FromArgb(113, 113, 109);
-    public static readonly Color Faint = Color.FromArgb(160, 160, 155);
-    public static readonly Color Accent = Color.FromArgb(68, 68, 65);
-    public static readonly Color Hover = Color.FromArgb(241, 241, 237);
-    public static readonly Color Navy = Color.FromArgb(25, 41, 65);
-    public static readonly Color Canvas = Color.FromArgb(247, 247, 245);
-    public static readonly Color Border = Color.FromArgb(229, 229, 225);
-    public static readonly Font SmallFont = new("Microsoft YaHei UI", 8f);
+    public static readonly Color Ink = Color.FromArgb(13, 13, 13);
+    public static readonly Color Muted = Color.FromArgb(93, 93, 93);
+    public static readonly Color Faint = Color.FromArgb(143, 143, 143);
+    public static readonly Color Accent = Color.FromArgb(48, 48, 48);
+    public static readonly Color Hover = Color.FromArgb(244, 244, 244);
+    public static readonly Color Pressed = Color.FromArgb(232, 232, 232);
+    public static readonly Color Canvas = Color.FromArgb(249, 249, 249);
+    public static readonly Color Border = Color.FromArgb(229, 229, 229);
+    public static readonly Color Green = Color.FromArgb(16, 163, 127);
+    public static readonly Color GreenFill = Color.FromArgb(232, 246, 241);
+    public static readonly Color WarningFill = Color.FromArgb(253, 246, 232);
+    public static readonly Color Selection = Color.FromArgb(200, 220, 252);
+    public static readonly Color Link = Color.FromArgb(37, 99, 235);
+    public static readonly Color Code = Color.FromArgb(55, 65, 81);
+    public static readonly Color Warning = Color.FromArgb(176, 110, 18);
+    public static readonly Color Danger = Color.FromArgb(220, 38, 38);
+    public static readonly Color DangerHover = Color.FromArgb(200, 30, 30);
+    public static readonly Color DangerPressed = Color.FromArgb(170, 24, 24);
+    public static readonly Color InkHover = Color.FromArgb(54, 54, 54);
+
+    // A large frame of the embedded app.ico; the shell-extracted icon is only 32 px.
+    public static Bitmap Logo(int size)
+    {
+        using var stream = typeof(DesktopTheme).Assembly.GetManifestResourceStream("CodexCleaner.app.ico")!;
+        using var icon = new Icon(stream, size, size);
+        return icon.ToBitmap();
+    }
 
     public static Color BackgroundOf(Control? control)
     {
@@ -31,7 +51,7 @@ internal static class DesktopTheme
         Margin = Padding.Empty, UseMnemonic = false,
     };
 
-    public static Button Button(string text, bool primary = false) => new ThemeButton(primary)
+    public static Button Button(string text, bool primary = false, bool danger = false) => new ThemeButton(primary || danger, danger)
     {
         Text = text,
     };
@@ -51,12 +71,13 @@ internal static class DesktopTheme
 
 internal sealed class ThemeButton : Button
 {
-    private readonly bool primary;
+    private readonly bool primary, danger;
     private bool hovered, pressed;
 
-    public ThemeButton(bool primary)
+    public ThemeButton(bool primary, bool danger = false)
     {
         this.primary = primary;
+        this.danger = danger;
         SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.SupportsTransparentBackColor | ControlStyles.ResizeRedraw, true);
         AutoSize = true;
         AutoSizeMode = AutoSizeMode.GrowAndShrink;
@@ -66,7 +87,7 @@ internal sealed class ThemeButton : Button
         BackColor = Color.Transparent;
         ForeColor = primary ? Color.White : DesktopTheme.Ink;
         Font = new Font("Microsoft YaHei UI", 9f);
-        Padding = new Padding(primary ? 18 : 10, primary ? 10 : 6, primary ? 18 : 10, primary ? 10 : 6);
+        Padding = new Padding(primary ? 18 : 12, 6, primary ? 18 : 12, 6);
         Margin = Padding.Empty;
         Cursor = Cursors.Hand;
         UseMnemonic = false;
@@ -75,7 +96,7 @@ internal sealed class ThemeButton : Button
     public override Size GetPreferredSize(Size proposedSize)
     {
         var text = TextRenderer.MeasureText(Text, Font, Size.Empty, TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
-        var height = (int)Math.Round((primary ? 40 : 32) * DeviceDpi / 96f);
+        var height = (int)Math.Round((primary ? 38 : 32) * DeviceDpi / 96f);
         return new Size(Math.Max(MinimumSize.Width, text.Width + Padding.Horizontal + (int)(4 * DeviceDpi / 96f)),
             Math.Max(MinimumSize.Height, Math.Max(height, text.Height + Padding.Vertical)));
     }
@@ -98,20 +119,24 @@ internal sealed class ThemeButton : Button
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
         var scale = DeviceDpi / 96f;
         var fill = primary
-            ? !Enabled ? Color.FromArgb(234, 234, 230) : pressed ? Color.FromArgb(20, 20, 19) : hovered ? Color.FromArgb(62, 62, 59) : DesktopTheme.Ink
-            : pressed && Enabled ? Color.FromArgb(230, 230, 225) : hovered && Enabled ? Color.FromArgb(241, 241, 237) : Color.Transparent;
-        using var path = DesktopTheme.RoundedRect(new Rectangle(1, 1, Width - 3, Height - 3), (primary ? 10 : 7) * scale);
-        if (fill != Color.Transparent)
+            ? !Enabled ? DesktopTheme.Pressed
+                : danger ? pressed ? DesktopTheme.DangerPressed : hovered ? DesktopTheme.DangerHover : DesktopTheme.Danger
+                : pressed ? Color.Black : hovered ? DesktopTheme.InkHover : DesktopTheme.Ink
+            : !Enabled ? Color.White : pressed ? DesktopTheme.Pressed : hovered ? DesktopTheme.Hover : Color.White;
+        var rect = new Rectangle(1, 1, Width - 3, Height - 3);
+        using var path = DesktopTheme.RoundedRect(rect, rect.Height / 2f);
+        using (var brush = new SolidBrush(fill)) e.Graphics.FillPath(brush, path);
+        if (!primary)
         {
-            using var brush = new SolidBrush(fill);
-            e.Graphics.FillPath(brush, path);
+            using var border = new Pen(DesktopTheme.Border);
+            e.Graphics.DrawPath(border, path);
         }
-        var textColor = !Enabled ? Color.FromArgb(153, 153, 147) : primary ? Color.White : ForeColor;
+        var textColor = !Enabled ? DesktopTheme.Faint : primary ? Color.White : ForeColor;
         TextRenderer.DrawText(e.Graphics, Text, Font, Rectangle.Inflate(ClientRectangle, -(int)(4 * scale), 0), textColor,
             TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
         if (Focused && ShowFocusCues)
         {
-            using var pen = new Pen(primary ? Color.FromArgb(155, 155, 148) : DesktopTheme.Accent, Math.Max(1, scale));
+            using var pen = new Pen(primary ? DesktopTheme.Faint : DesktopTheme.Accent, Math.Max(1, scale));
             e.Graphics.DrawPath(pen, path);
         }
     }
@@ -166,7 +191,7 @@ internal sealed class SearchField : SurfacePanel
     {
         this.input = input;
         this.clear = clear;
-        CornerRadius = 6;
+        CornerRadius = 20;
         TabStop = false;
         input.Margin = clear.Margin = Padding.Empty;
         Controls.Add(input);
@@ -227,7 +252,7 @@ internal sealed class ClearSearchButton : Button
         if (hovered && Enabled)
         {
             using var shape = DesktopTheme.RoundedRect(new Rectangle(1, 1, Width - 3, Height - 3), 5 * scale);
-            using var fill = new SolidBrush(Color.FromArgb(241, 241, 237));
+            using var fill = new SolidBrush(DesktopTheme.Hover);
             e.Graphics.FillPath(fill, shape);
         }
         using var pen = new Pen(DesktopTheme.Muted, 1.5f * scale);
@@ -277,7 +302,7 @@ internal sealed class FilterComboBox : ComboBox
     {
         if (e.Index < 0) return;
         var selected = (e.State & DrawItemState.Selected) != 0;
-        using var fill = new SolidBrush(selected ? Color.FromArgb(240, 240, 235) : Color.White);
+        using var fill = new SolidBrush(selected ? DesktopTheme.Hover : Color.White);
         e.Graphics.FillRectangle(fill, e.Bounds);
         var inset = (int)(10 * DeviceDpi / 96f);
         var bounds = Rectangle.FromLTRB(e.Bounds.Left + inset, e.Bounds.Top, e.Bounds.Right - inset, e.Bounds.Bottom);
@@ -295,8 +320,8 @@ internal sealed class FilterComboBox : ComboBox
         graphics.Clear(DesktopTheme.BackgroundOf(Parent));
         graphics.SmoothingMode = SmoothingMode.AntiAlias;
         var scale = DeviceDpi / 96f;
-        using var path = DesktopTheme.RoundedRect(new Rectangle(0, 0, Width - 1, Height - 1), 6 * scale);
-        using var fill = new SolidBrush(hovered && Enabled ? Color.FromArgb(249, 249, 246) : Color.White);
+        using var path = DesktopTheme.RoundedRect(new Rectangle(0, 0, Width - 1, Height - 1), (Height - 1) / 2f);
+        using var fill = new SolidBrush(hovered && Enabled ? DesktopTheme.Hover : Color.White);
         graphics.FillPath(fill, path);
         using var border = new Pen(Focused || DroppedDown ? DesktopTheme.Accent : DesktopTheme.Border);
         graphics.DrawPath(border, path);

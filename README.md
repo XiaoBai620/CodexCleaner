@@ -8,7 +8,7 @@ Windows 桌面小工具：选择本机的 Codex 聊天与记忆，核对预览�
 
 ## 使用
 
-需要 64 位 Windows 10/11 和 [.NET 10 桌面运行时](https://dotnet.microsoft.com/download/dotnet/10.0)（Windows Desktop Runtime）。从 [Releases](https://github.com/XiaoBai620/CodexCleaner/releases/latest) 下载 `CodexCleaner.exe`（约 3 MB）双击运行；没装运行时的话，Windows 会弹窗提示并给出下载地址。工具不占用端口。
+需要 64 位 Windows 10/11 和 [.NET 10 桌面运行时](https://dotnet.microsoft.com/download/dotnet/10.0)（Windows Desktop Runtime）。从 [Releases](https://github.com/XiaoBai620/CodexCleaner/releases/latest) 下载 `CodexCleaner.exe`（约 3 MB）双击运行。只需要这一个文件，SQLite 等依赖已打包在内，不需要附带 dll；放在任意目录都能运行，临时事务目录在 `%LOCALAPPDATA%\CodexCleaner`，与 exe 位置无关；没装运行时的话，Windows 会弹窗提示并给出下载地址。工具不占用端口。
 
 启动后会在后台检查 GitHub 上的最新正式版本，有新版本时显示更新提示，也可点击“检查更新”。点击“前往更新”才会打开本项目的发布页，由你下载替换程序，不会自动下载安装。断网或检查失败不影响清理。
 

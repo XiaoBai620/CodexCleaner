@@ -4,11 +4,6 @@ namespace CodexCleaner;
 
 internal sealed class ConfirmDialog : Form
 {
-    private static readonly Color Ink = Color.FromArgb(25, 39, 62);
-    private static readonly Color Muted = Color.FromArgb(101, 116, 139);
-    private static readonly Color Accent = Color.FromArgb(55, 100, 235);
-    private static readonly Color Canvas = Color.FromArgb(244, 247, 251);
-    private static readonly Color Danger = Color.FromArgb(190, 55, 64);
     private readonly Func<ProcessState> processState;
     private readonly DateTimeOffset expiresAt;
     private readonly bool live;
@@ -27,8 +22,8 @@ internal sealed class ConfirmDialog : Form
         Text = plan.Repair ? "核对失效引用修复" : "核对清理范围";
         ClientSize = new Size(960, 680);
         MinimumSize = new Size(820, 580);
-        BackColor = Canvas;
-        ForeColor = Ink;
+        BackColor = DesktopTheme.Canvas;
+        ForeColor = DesktopTheme.Ink;
         Font = new Font("Microsoft YaHei UI", 9f);
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = MaximizeBox = false;
@@ -50,9 +45,9 @@ internal sealed class ConfirmDialog : Form
         heading.RowStyles.Add(new RowStyle(SizeType.Absolute, 23));
         heading.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
         heading.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        heading.Controls.Add(new Label { Text = "02  /  核对并执行", AutoSize = true, ForeColor = Accent, Font = new Font(Font.FontFamily, 9f, FontStyle.Bold), Margin = Padding.Empty }, 0, 0);
+        heading.Controls.Add(new Label { Text = "02  /  核对并执行", AutoSize = true, ForeColor = DesktopTheme.Ink, Font = new Font(Font.FontFamily, 9f, FontStyle.Bold), Margin = Padding.Empty }, 0, 0);
         heading.Controls.Add(new Label { Text = plan.Repair ? "让本地引用恢复整洁" : "确认这次要清理的内容", AutoSize = true, Font = new Font(Font.FontFamily, 19f, FontStyle.Bold), Margin = Padding.Empty }, 0, 1);
-        heading.Controls.Add(new Label { Text = "展开左侧明细，右侧可查看并复制完整说明。", AutoSize = true, ForeColor = Muted, Margin = Padding.Empty }, 0, 2);
+        heading.Controls.Add(new Label { Text = "展开左侧明细，右侧可查看并复制完整说明。", AutoSize = true, ForeColor = DesktopTheme.Muted, Margin = Padding.Empty }, 0, 2);
         root.Controls.Add(heading, 0, 0);
 
         var metrics = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Margin = new Padding(0, 10, 0, 8) };
@@ -67,8 +62,8 @@ internal sealed class ConfirmDialog : Form
         var notice = new Label
         {
             Dock = DockStyle.Fill, Padding = new Padding(12, 9, 12, 9), Margin = new Padding(0, 2, 0, 10),
-            BackColor = recordOnly.Count > 0 ? Color.FromArgb(255, 244, 222) : Color.FromArgb(234, 240, 253),
-            ForeColor = recordOnly.Count > 0 ? Color.FromArgb(146, 88, 20) : Ink,
+            BackColor = recordOnly.Count > 0 ? DesktopTheme.WarningFill : DesktopTheme.Hover,
+            ForeColor = recordOnly.Count > 0 ? DesktopTheme.Warning : DesktopTheme.Ink,
             TextAlign = ContentAlignment.MiddleLeft,
             Text = plan.Live
                 ? "Codex 正在运行：只删除未在使用的聊天，执行时会锁住它们，防止 Codex 同时打开。\n置顶、草稿等桌面界面引用暂不修改，退出 Codex 后点击「检查失效引用」清除。"
@@ -84,7 +79,7 @@ internal sealed class ConfirmDialog : Form
         body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 57));
         var tree = new TreeView
         {
-            Dock = DockStyle.Fill, ShowNodeToolTips = true, BackColor = Color.White, ForeColor = Ink,
+            Dock = DockStyle.Fill, ShowNodeToolTips = true, BackColor = Color.White, ForeColor = DesktopTheme.Ink,
             BorderStyle = BorderStyle.None, FullRowSelect = true, HideSelection = false,
             ItemHeight = 30, Indent = 18, Font = Font, AccessibleName = "清理项目明细",
         };
@@ -92,17 +87,19 @@ internal sealed class ConfirmDialog : Form
         {
             Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, WordWrap = true,
             ScrollBars = ScrollBars.Vertical, BorderStyle = BorderStyle.None,
-            BackColor = Color.White, ForeColor = Ink, Font = Font, AccessibleName = "所选项目完整说明",
+            BackColor = Color.White, ForeColor = DesktopTheme.Ink, Font = Font, AccessibleName = "所选项目完整说明",
         };
-        var treeFrame = new Panel { Dock = DockStyle.Fill, BackColor = Color.White, Padding = new Padding(10), Margin = new Padding(0, 0, 10, 0) };
+        var treeFrame = new SurfacePanel { Dock = DockStyle.Fill, CornerRadius = 16, Padding = new Padding(12), Margin = new Padding(0, 0, 10, 0) };
         treeFrame.Controls.Add(tree);
-        var detailFrame = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor = Color.White, Padding = new Padding(16), Margin = Padding.Empty };
+        var detailCard = new SurfacePanel { Dock = DockStyle.Fill, CornerRadius = 16, Padding = new Padding(16), Margin = Padding.Empty };
+        var detailFrame = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor = Color.White, Margin = Padding.Empty };
+        detailCard.Controls.Add(detailFrame);
         detailFrame.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
         detailFrame.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        detailFrame.Controls.Add(new Label { Text = "完整说明", AutoSize = true, Font = new Font(Font, FontStyle.Bold), ForeColor = Muted, Margin = Padding.Empty }, 0, 0);
+        detailFrame.Controls.Add(new Label { Text = "完整说明", AutoSize = true, Font = new Font(Font, FontStyle.Bold), ForeColor = DesktopTheme.Muted, Margin = Padding.Empty }, 0, 0);
         detailFrame.Controls.Add(detail, 0, 1);
         body.Controls.Add(treeFrame, 0, 0);
-        body.Controls.Add(detailFrame, 1, 0);
+        body.Controls.Add(detailCard, 1, 0);
         root.Controls.Add(body, 0, 3);
 
         TreeNode Section(string title, IEnumerable<(string Label, string Detail)> entries, bool expand = false)
@@ -133,11 +130,14 @@ internal sealed class ConfirmDialog : Form
         tree.AfterSelect += (_, e) => detail.Text = e.Node?.Tag as string ?? "";
         tree.SelectedNode = overview;
 
-        confirm = ActionButton(plan.Repair ? "确认修复" : "确认清理", plan.Repair ? Accent : Danger, Color.White);
+        confirm = DesktopTheme.Button(plan.Repair ? "确认修复" : "确认清理", primary: true, danger: !plan.Repair);
         confirm.DialogResult = DialogResult.OK;
         confirm.Enabled = false;
-        var cancel = ActionButton("返回调整", Color.White, Ink);
+        confirm.Margin = new Padding(10, 0, 0, 0);
+        var cancel = DesktopTheme.Button("返回调整");
         cancel.DialogResult = DialogResult.Cancel;
+        cancel.Margin = new Padding(10, 0, 0, 0);
+        confirm.Anchor = cancel.Anchor = AnchorStyles.Right;
         var footer = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Margin = Padding.Empty, Padding = new Padding(0, 14, 0, 0) };
         footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -161,27 +161,15 @@ internal sealed class ConfirmDialog : Form
 
     private static Control Metric(string label, long count)
     {
-        var card = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = Color.White, Padding = new Padding(14, 8, 14, 8), Margin = new Padding(0, 0, 8, 0) };
-        card.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        card.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        card.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        card.Controls.Add(new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Left, ForeColor = Muted }, 0, 0);
-        card.Controls.Add(new Label { Text = count.ToString("N0"), AutoSize = true, Anchor = AnchorStyles.Right, ForeColor = Ink, Font = new Font("Segoe UI", 22f, FontStyle.Bold) }, 1, 0);
+        var card = new SurfacePanel { Dock = DockStyle.Fill, CornerRadius = 16, Padding = new Padding(16, 8, 16, 8), Margin = new Padding(0, 0, 8, 0) };
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = Color.White, Margin = Padding.Empty };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        layout.Controls.Add(new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Left, ForeColor = DesktopTheme.Muted }, 0, 0);
+        layout.Controls.Add(new Label { Text = count.ToString("N0"), AutoSize = true, Anchor = AnchorStyles.Right, ForeColor = DesktopTheme.Ink, Font = new Font("Segoe UI", 22f, FontStyle.Bold) }, 1, 0);
+        card.Controls.Add(layout);
         return card;
-    }
-
-    private static Button ActionButton(string title, Color back, Color fore)
-    {
-        var button = new Button
-        {
-            Text = title, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            FlatStyle = FlatStyle.Flat, BackColor = back, ForeColor = fore,
-            Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold), Padding = new Padding(18, 10, 18, 10),
-            Margin = new Padding(10, 0, 0, 0), Cursor = Cursors.Hand, UseVisualStyleBackColor = false,
-        };
-        button.FlatAppearance.BorderSize = back == Color.White ? 1 : 0;
-        button.FlatAppearance.BorderColor = Color.FromArgb(218, 225, 235);
-        return button;
     }
 
     private async Task UpdateGate()
@@ -200,7 +188,7 @@ internal sealed class ConfirmDialog : Form
             gate.Text = expired ? "预览已过期，请返回重新预览。"
                 : blocked ? "请先退出 Codex，退出后将自动允许确认。"
                 : $"可以执行{(live ? " · 仅删除未在使用的聊天" : "")} · 此预览有效至 {expiresAt.ToLocalTime():HH:mm}";
-            gate.ForeColor = expired || blocked ? Color.FromArgb(152, 94, 29) : Color.FromArgb(29, 123, 90);
+            gate.ForeColor = expired || blocked ? DesktopTheme.Warning : DesktopTheme.Green;
         }
         catch (Exception e) when (e is not OutOfMemoryException)
         {
@@ -208,7 +196,7 @@ internal sealed class ConfirmDialog : Form
             confirm.Enabled = false;
             gate.Text = "暂时无法确认 Codex 状态，请稍后重试。";
             gate.AccessibleDescription = e.Message;
-            gate.ForeColor = Danger;
+            gate.ForeColor = DesktopTheme.Danger;
         }
         finally { checking = false; }
     }
