@@ -5,8 +5,8 @@ namespace CodexCleaner.Engine;
 public sealed partial class Cleaner
 {
     // Tool output can reach megabytes per call; the viewer only needs a readable prefix.
-    internal const int ToolResultLimit = 20_000;
-    internal const int ToolArgumentsLimit = 4_000;
+    internal const int ToolResultLimit = 200_000;
+    internal const int ToolArgumentsLimit = 200_000;
 
     // thread_items is Codex's own projection of the rollout into display items, in rollout order.
     public IReadOnlyList<ChatMessage> Conversation(string chatId) => WithRead(() =>
