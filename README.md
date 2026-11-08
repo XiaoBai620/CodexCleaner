@@ -1,6 +1,6 @@
 # CodexCleaner · Codex 本地清理台
 
-Windows 桌面小工具：选择本机的 Codex 聊天与记忆，核对预览后一次确认删除，并修复指向已删除聊天的失效引用。
+Windows 桌面小工具：选择本机的 Codex 聊天与记忆，核对预览后确认清理。删除前保留可恢复备份，也可修复指向已删除聊天的失效引用。
 
 **独立社区项目，与 OpenAI 无官方隶属关系。** 只支持已验证的本机存储结构；Codex 数据格式变化时会停止清理，等待工具适配。
 
@@ -15,7 +15,9 @@ Windows 桌面小工具：选择本机的 Codex 聊天与记忆，核对预览�
 1. 按标题或 ID 搜索，也可按状态筛选。点选一行，在右侧查看完整标题、路径、消息数和处理原因；点击“查看对话”或双击行可只读查看对话。勾选框用于选择清理内容。“全选结果”选择当前筛选中的可清理聊天；底部统计包含筛选外已选记录。
 2. Codex 开着也能清理：正在 Codex 中使用（已加载、或有子任务在跑）的聊天标为“使用中”，不能勾选；其他聊天可以直接预览并确认。运行期间不修改桌面界面状态（置顶、草稿等），退出 Codex 后点击“检查失效引用”清除残留。
 3. “全部本地记忆”“共享输入历史与日志”默认不勾选，需要先完全退出 Codex 桌面应用和命令行才能选择。点击“预览清理范围”，逐项核对聊天、数据库、文件及保留的会话文件，再点击“确认清理”。
-4. 之前删除后在 Codex 里遇到项目或归档错误时，退出 Codex 后点击“检查失效引用”，核对后“确认修复”。
+4. 清理时，状态栏显示当前阶段和累计执行秒数。成功清理后，备份仍保留；需要找回时先退出 Codex，点击“备份与恢复”，选择备份和聊天，预览后确认恢复。当前已有同 ID 的聊天会整条跳过，避免覆盖。全部记忆、共享历史与日志需要单独勾选，按整组恢复。
+5. 运行中清理若只完成了一部分，先退出 Codex，再在“备份与恢复”中点击“处理未完成清理”。工具核对哪些数据仍处于本次操作的前后状态；有冲突时停止，保留故障材料。
+6. 之前删除后在 Codex 里遇到项目或归档错误时，退出 Codex 后点击“检查失效引用”，核对后“确认修复”。
 
 exe 没有代码签名，首次运行时 SmartScreen 可能提示“未知发布者”（点“更多信息”→“仍要运行”）。可以对照发布页的 `SHA256SUMS.txt` 核对文件：`certutil -hashfile CodexCleaner.exe SHA256`。
 
@@ -35,15 +37,26 @@ exe 没有代码签名，首次运行时 SmartScreen 可能提示“未知发布
 | 清空共享输入历史与日志 | 桌面全局输入历史和 `logs_2.sqlite` 中的全部日志，会影响所有聊天。 |
 | 检查失效引用 | 只清除指向已不存在聊天的本机引用，保留现存聊天、项目和远端主机记录。 |
 
-项目、工作树、插件、技能、设置、登录信息和自动化定义都不在清理范围。被自动化任务引用的聊天不能删除，需要先在 Codex 里处理该任务；被其他分叉聊天当作历史来源的聊天需要和分叉聊天一起删除。删除是普通的本机删除，不能撤销，也不是磁盘安全擦除；云端记录和外部备份不受影响。
+项目、工作树、插件、技能、设置、登录信息和自动化定义都不在清理范围。被自动化任务引用的聊天不能删除，需要先在 Codex 里处理该任务；被其他分叉聊天当作历史来源的聊天需要和分叉聊天一起删除。删除是普通的本机删除，不是磁盘安全擦除；可从本工具删除前保留的备份中恢复受支持的内容。此前版本已删除且没有保留备份的数据无法由此找回，云端记录和外部备份不受影响。
+
+## 备份与恢复
+
+退出 Codex 后的清理、Codex 运行中的闲置聊天清理都会先保存并核对备份，再开始删除。默认位置为 `%LOCALAPPDATA%\CodexCleaner\Backups`；备份包含所选数据库行、原会话文件（含分段和 `.jsonl.zst`）及对应索引条目。备份只用于原数据目录；当前各数据库的存在状态、结构指纹和迁移记录必须与备份一致，发现未验证版本的数据库时拒绝恢复，不自动迁移旧备份。
+
+普通聊天恢复包括数据库记录、原相对路径的会话文件、`session_index.jsonl` 和 `history.jsonl` 的对应条目。保留现有无关内容，不恢复置顶、草稿、窗口和标签状态。异常路径的“仅清理记录”只恢复记录与索引，不访问原异常路径；原先就缺失的文件不会凭空补齐。分叉聊天需要可用的父聊天历史；缺少父聊天、项目或分组等依赖时，先处理依赖再恢复。
+
+“备份与恢复”显示每份备份的时间、会话数量和实际占用，可全选可恢复聊天，也可确认删除旧备份。清理前显示估计备份大小；实际占用可能因数据类型、页开销和原文件大小不同而增加。运行中清理还保存本次改写索引的完整前后内容作故障材料；离线清理及恢复会临时复制将修改的数据库，峰值空间高于持久备份大小。持久备份不会因恢复完成而自动删除，也没有自动过期策略；删除备份后，不能再从这份备份找回数据。
+
+未完成的清理备份不能按普通备份恢复或删除，应使用“处理未完成清理”。修复只补回能核对为本次操作移除的内容；备份损坏、结构不兼容或当前内容无法判定时拒绝覆盖。运行中索引写入遇到可捕获异常时，会在同一文件锁内还原并校验；若中断后的索引不符合完整前后内容，也不只是追加了无关聊天的有效记录，则保留材料并拒绝自动恢复。多个数据库和文件不能跨文件原子提交，断电或回滚失败可能需要人工处理；请保留提示中的故障路径，不要自行删除故障材料。“检查失效引用”仍使用临时事务回滚，不生成可恢复的聊天备份。
 
 ## 兼容性与安全
 
 - 支持的数据库结构来自 **2026-10-31** 的兼容性检查。工具会校验每个数据库的表和触发器定义指纹，任何一个不匹配都只允许浏览。
 - 写入前检查 Codex 进程（包括商店版应用、命令行和数据目录内的 Codex 程序）。Codex 退出时按原有流程执行，并在过程中多次复查进程。
-- Codex 运行时，按 Codex 自己的 `thread-writer-locks` 写入锁判断聊天是否在使用；执行时先占住所选聊天的写入锁，Codex 无法同时打开它们。共享数据库只删除这些聊天的行，每个库单独事务，失败的库自动回滚。
+- Codex 运行时，按 Codex 自己的 `thread-writer-locks` 写入锁判断聊天是否在使用；执行时先占住所选聊天的写入锁和会话整理锁，再备份。每个数据库在写入事务内复查待删除行与备份一致后才删除；失败的库自动回滚，已完成部分由持久备份与故障处理入口保留恢复依据。
 - 预览 15 分钟内有效。Codex 退出时绑定所有相关文件的数据指纹；运行时绑定所选聊天的更新时间和会话文件指纹。预览后有变化都会要求重新预览。
-- 执行时先把要修改的数据库和文件备份到 `%LOCALAPPDATA%\CodexCleaner\Transactions`，出错自动回滚并校验。成功或回滚成功后删除备份；回滚本身失败时保留故障材料并锁定后续写入，界面会显示具体路径。
+- 持久备份位于 `%LOCALAPPDATA%\CodexCleaner\Backups`，清理完成后保留。离线清理与恢复另将当前数据库和文件复制到 `Transactions` 用于失败回滚；只有临时事务副本在完成或回滚验证后移除。回滚本身失败时保留故障材料并锁定后续写入，界面会显示具体路径。
+- 恢复要求 Codex 已退出，并占用会话整理锁和相关聊天写入锁。恢复前再次核对结构、依赖和冲突；恢复失败时还原操作前的数据，删除本次新建且内容未改变的文件，持久备份继续保留。
 - 文件删除拒绝越界路径、符号链接、目录联接和硬链接。“仅清理记录”不放宽文件路径检查，也不能绕过数据库或自动化保护。
 
 内部结构见 [架构与兼容性](docs/architecture.md)。
@@ -57,7 +70,7 @@ dotnet test tests/CodexCleaner.Tests
 dotnet publish src/CodexCleaner -c Release -o dist
 ```
 
-测试在系统临时目录生成虚构数据，不读取也不修改真实的 `.codex`。发布步骤见 [发布指南](docs/releasing.md)。
+测试在系统临时目录生成虚构数据，不读取也不修改真实的 `.codex`。性能和界面测量须先将 SQLite 用 backup API、其余普通文件直接复制到隔离临时目录，再将 `CODEX_HOME` 指向副本；不跟随链接、不把真实凭证或内容写入报告，测后清理副本。发布步骤见 [发布指南](docs/releasing.md)。
 
 ```text
 src/CodexCleaner/        WinForms 桌面界面
@@ -74,4 +87,4 @@ docs/                    使用说明、架构、发布、贡献与安全说明
 
 ## English
 
-CodexCleaner is an independent native Windows utility for reviewing and deleting recognized local Codex chats and memories, with explicit previews and repair of stale local references. It ships as a single small exe that requires the .NET 10 Windows Desktop Runtime, refuses writes to unverified database schemas, deletes idle chats while Codex runs by holding Codex's own per-thread writer locks, and rolls back automatically on failure. It does not erase cloud records or perform forensic disk wiping.
+CodexCleaner is an independent native Windows utility for reviewing and deleting recognized local Codex chats and memories, with explicit previews and repair of stale local references. It ships as a single small exe that requires the .NET 10 Windows Desktop Runtime, refuses writes to unverified database schemas, deletes idle chats while Codex runs by holding Codex's own per-thread writer locks, and retains verified backups before deletion. Restore requires Codex to be closed and compatible database schemas, skips existing chats, and preserves unrelated data. Interrupted live cleanup has a separate recovery path; multi-file operations are not crash-atomic. It does not erase cloud records or perform forensic disk wiping.

@@ -61,7 +61,10 @@ public sealed record ChatToolCall(string Id, string Name, string Summary, string
 
 public sealed record ChatMessage(ChatRole Role, string Text, string? Thinking, IReadOnlyList<ChatToolCall> ToolCalls, DateTimeOffset CreatedAt);
 
-public sealed record ExecuteResult(string? ResidualDirectory, string? ResidualError);
+public sealed record ExecuteResult(string? ResidualDirectory, string? ResidualError)
+{
+    public string? BackupDirectory { get; init; }
+}
 
 internal enum ActionKind { Delete, ClearReference, CatalogRevision }
 
@@ -128,4 +131,5 @@ internal sealed class TestHooks
     public Action? BeforeReclaimOpen;
     public Action? BeforeRollback;
     public Action? AfterThreadLocks;
+    public Action<string>? AfterIndexWrite;
 }

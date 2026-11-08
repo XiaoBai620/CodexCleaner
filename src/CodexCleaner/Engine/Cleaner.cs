@@ -384,11 +384,11 @@ public sealed partial class Cleaner
 
     public IReadOnlyList<RecoveryIssue> RecoveryIssues()
     {
+        var issues = BackupRecoveryIssues().ToList();
         string directory;
         try { directory = Trash(); }
-        catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException) { return []; }
-        if (!Directory.Exists(directory)) return [];
-        var issues = new List<RecoveryIssue>();
+        catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException) { return issues; }
+        if (!Directory.Exists(directory)) return issues;
         foreach (var entry in new DirectoryInfo(directory).EnumerateDirectories().Where(d => !d.Attributes.HasFlag(FileAttributes.ReparsePoint)))
         {
             var (error, blocks) = ("", true);

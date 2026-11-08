@@ -12,7 +12,7 @@ internal sealed class ConfirmDialog : Form
     private readonly System.Windows.Forms.Timer timer = new() { Interval = 1500 };
     private bool checking;
 
-    public ConfirmDialog(Plan plan, Func<ProcessState> processState)
+    public ConfirmDialog(Plan plan, Func<ProcessState> processState, long? estimatedBackupBytes = null)
     {
         this.processState = processState;
         expiresAt = plan.ExpiresAt;
@@ -37,7 +37,7 @@ internal sealed class ConfirmDialog : Form
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 80));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 80));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 66));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, plan.Repair ? 66 : 104));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 72));
 
@@ -69,8 +69,13 @@ internal sealed class ConfirmDialog : Form
                 ? "Codex 正在运行：只删除未在使用的聊天，执行时会锁住它们，防止 Codex 同时打开。\n置顶、草稿等桌面界面引用暂不修改，退出 Codex 后点击「检查失效引用」清除。"
                 : recordOnly.Count > 0
                 ? $"其中 {recordOnly.Count} 条仅清理本地记录与关联数据，原会话文件会保留。\n这些文件以后可能被重新导入；请查看“保留的会话文件”。"
-                : plan.Repair ? "仅修复已失效的本机引用，保留有效聊天和项目。" : "确认后会直接删除所列内容，本工具不提供撤销。请核对下方的附加清理范围。",
+                : plan.Repair ? "仅修复已失效的本机引用，保留有效聊天和项目。" : "确认后会删除所列内容。请核对下方的聊天和附加清理范围。",
         };
+        if (!plan.Repair)
+        {
+            notice.Text += "\n删除前会保留备份" + (estimatedBackupBytes is { } bytes ? $"，预计新增 {MainForm.FormatBytes(bytes)}" : "") + "；退出 Codex 后可在“备份与恢复”中找回。";
+            if (plan.Selection.ClearMemories || plan.Selection.ClearSharedHistory) notice.Text += "\n全部记忆、共享历史与日志按附加组保存，恢复时需单独选择。";
+        }
         root.Controls.Add(notice, 0, 2);
 
         var body = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
@@ -118,6 +123,9 @@ internal sealed class ConfirmDialog : Form
             (plan.Selection.ClearMemories ? "全部本地记忆：清空" : "全部本地记忆：保留", plan.Selection.ClearMemories ? "已主动选择清空全部本地记忆。该操作可能影响所有聊天产生的合并记忆。" : "未选择全局记忆清空。删除聊天时仍会清理与该聊天直接关联的记忆记录。"),
             (plan.Selection.ClearSharedHistory ? "共享历史与日志：清空" : "共享历史与日志：保留", plan.Selection.ClearSharedHistory ? "已主动选择清空共享输入历史与日志。这会影响所有聊天。" : "未选择全局清空；仅处理所选聊天已识别的关联记录。"),
         };
+        if (!plan.Repair)
+            scope.Add(("删除前备份", (estimatedBackupBytes is { } bytes ? $"预计新增备份占用：{MainForm.FormatBytes(bytes)}。实际大小以备份完成后为准。\r\n\r\n" : "")
+                + "所选聊天和附加清理内容会在删除前备份并校验。退出 Codex 后可选择聊天恢复，已经存在的聊天会跳过；置顶、草稿和窗口状态不会自动恢复。\r\n\r\n全部记忆、共享历史与日志分别按附加组恢复，不随聊天勾选自动恢复。退出后清理还需要临时保存完整数据库用于故障回滚，峰值空间会高于上述长期备份占用。"));
         var overview = Section("本次范围", scope, true);
         if (!plan.Repair)
             Section("选中的聊天", plan.Chats.Select(c => (c.Title + (c.CanRemoveRecord ? " · 仅记录" : ""), $"{c.Title}\r\n\r\n聊天 ID\r\n{c.Id}\r\n\r\n处理方式\r\n{(c.CanRemoveRecord ? "仅清理本地记录与关联数据，保留原会话文件。" : c.RolloutMissing ? "原会话文件已缺失，清理剩余记录。" : "清理聊天记录及经过验证的会话文件。")}\r\n\r\n原会话路径\r\n{(string.IsNullOrWhiteSpace(c.OriginalPath) ? c.RelativePath ?? "未提供会话文件路径" : c.OriginalPath)}")));

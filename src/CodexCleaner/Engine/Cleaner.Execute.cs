@@ -58,8 +58,16 @@ public sealed partial class Cleaner
         AssertStillAllowed(plan);
         if (plan.Public.Selection.ClearMemories && !MemoryFiles().SequenceEqual(plan.MemoryPaths)) throw new CleanerException("记忆文件列表在预览后改变，请重新预览。");
         // Holding the writer locks keeps a Codex that starts mid-cleanup from opening these chats.
+        using var maintenance = RolloutMaintenanceLock();
         using var locks = ThreadLocks.Acquire(ThreadLockRoot(), repair ? [] : plan.Public.Selection.ChatIds);
-        return Apply(plan, repair, progress);
+        var backup = repair ? null : PrepareBackup(plan, progress);
+        try { return Apply(plan, repair, progress, backup); }
+        catch
+        {
+            if (backup is not null && backup.Manifest.Status != "complete")
+                SetBackupStatus(backup, RecoveryIssues().Any(issue => issue.BlocksWrites && SafePaths.Inside(TransactionRoot, issue.Directory)) ? "needs-recovery" : "recovered");
+            throw;
+        }
     });
 
     // Runs beside Codex. Every selected chat's writer lock is held, so Codex cannot load, resume or
@@ -84,65 +92,120 @@ public sealed partial class Cleaner
         var selected = ids.ToHashSet(StringComparer.Ordinal);
         var done = new List<string>();
         var commits = 0;
+        var backup = PrepareBackup(plan, progress);
         try
         {
+            AssertFingerprints(plan.Fingerprints);
+            SetBackupStatus(backup, "applying");
             foreach (var work in plan.Databases.Where(d => d.Path != "state_5.sqlite"))
             {
                 progress?.Report($"正在清理数据库（第 {commits + 1}/共 {plan.Databases.Count} 个）：{work.Path}");
-                CommitLive(work, ++commits);
+                CommitLive(work, ++commits, backup, plan.Public.Selection);
                 done.Add(work.Path);
+                BackupStep(backup, "database:" + work.Path);
             }
             progress?.Report("正在删除会话文件");
             foreach (var file in plan.Files.Where(f => f.Remove))
             {
                 Hooks.BeforeDelete?.Invoke(Data(file.Path));
+                if (FingerprintOf(DataRoot, file.Path) != backup.Manifest.Files.Single(saved => saved.Path == file.Path).Before)
+                    throw new CleanerException($"备份后会话文件发生变化，停止删除：{file.Path}");
                 File.Delete(Data(file.Path));
                 done.Add(file.Path);
+                BackupStep(backup, "file:" + file.Path);
             }
             progress?.Report("正在更新索引");
-            foreach (var rel in IndexFiles) if (RewriteIndexLive(rel, selected)) done.Add(rel);
+            foreach (var rel in IndexFiles)
+            {
+                if (RewriteIndexLive(rel, selected, backup)) done.Add(rel);
+                BackupStep(backup, "index:" + rel);
+            }
             foreach (var work in plan.Databases.Where(d => d.Path == "state_5.sqlite"))
             {
                 progress?.Report($"正在清理数据库（第 {commits + 1}/共 {plan.Databases.Count} 个）：{work.Path}");
-                CommitLive(work, ++commits);
+                CommitLive(work, ++commits, backup, plan.Public.Selection);
                 done.Add(work.Path);
+                BackupStep(backup, "database:" + work.Path);
             }
+            SetBackupStatus(backup, "complete");
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or SqliteException or CleanerException or InvalidOperationException)
         {
+            SetBackupStatus(backup, "needs-recovery", e.Message);
             throw new CleanerException(done.Count == 0
-                ? $"{e.Message} 未修改任何数据。"
-                : $"{e.Message} 出错的数据库已回滚；已完成：{string.Join('、', done)}。聊天仍保留在列表中，重新预览后可继续清理。", e);
+                ? $"{e.Message} 未完成清理，请退出 Codex 后在“备份与恢复”中核对故障备份：{backup.Directory}。"
+                : $"{e.Message} 出错的数据库已回滚；已完成：{string.Join('、', done)}。请退出 Codex 后在“备份与恢复”中恢复未完成清理，重新预览后可继续清理。备份：{backup.Directory}", e);
         }
-        return new ExecuteResult(null, null);
+        return new ExecuteResult(null, null) { BackupDirectory = backup.Directory };
     }
 
-    private void CommitLive(DatabaseWork work, int index)
+    private void CommitLive(DatabaseWork work, int index, BackupPackage backup, Selection selection)
     {
         using var db = Db.Open(Data(work.Path), writable: true, busySeconds: 10);
         Db.Exec(db, "PRAGMA secure_delete=ON");
         using var transaction = db.BeginTransaction(deferred: false);
+        VerifyBackupRows(backup, db, work, selection);
         foreach (var action in work.Actions) Db.Exec(db, ActionSql(action), action.Args);
         AssertActionsApplied(db, work);
+        if (Db.Scalar(db, "PRAGMA quick_check") as string != "ok") throw new CleanerException($"数据库一致性校验失败：{work.Path}");
         Hooks.BeforeCommit?.Invoke(index);
         transaction.Commit();
     }
 
     // Codex appends history.jsonl under an exclusive LockFileEx lock (codex-rs/message-history);
     // holding the same lock makes the in-place rewrite exclusive with its writers and readers.
-    private bool RewriteIndexLive(string rel, IReadOnlySet<string> ids)
+    private bool RewriteIndexLive(string rel, IReadOnlySet<string> ids, BackupPackage backup)
     {
-        if (Stat(rel) is not { } entry) return false;
+        if (Stat(rel) is not { } entry)
+        {
+            VerifyBackupIndex(backup, rel, [], ids);
+            return false;
+        }
         if (entry is not FileInfo file || file.Length > Catalog.MaxJsonBytes || !IndependentFile(file)) throw new CleanerException($"索引太大或类型未知：{rel}");
         using var stream = new FileStream(file.FullName, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete);
         ThreadLocks.Wait(stream, $"Codex 正在写入 {rel}，请稍后重试。");
         var bytes = new byte[stream.Length];
         stream.ReadExactly(bytes);
+        VerifyBackupIndex(backup, rel, bytes, ids);
         if (WithoutIds(rel, bytes, ids) is not { } kept) return false;
-        stream.Position = 0;
-        stream.Write(kept);
-        stream.SetLength(kept.Length);
-        stream.Flush(true);
+        var saved = backup.Manifest.Indexes.Single(index => index.Path == rel);
+        Directory.CreateDirectory(Safe(backup.Directory, "indexes", missing: true));
+        AtomicWrite(backup.Directory, "indexes/" + rel + ".before", bytes);
+        AtomicWrite(backup.Directory, "indexes/" + rel + ".after", kept);
+        saved.JournalBefore = new Fingerprint(true, bytes.Length, DesktopState.Hash(bytes));
+        saved.JournalAfter = new Fingerprint(true, kept.Length, DesktopState.Hash(kept));
+        SaveBackupManifest(backup);
+        try
+        {
+            stream.Position = 0;
+            stream.Write(kept);
+            Hooks.AfterIndexWrite?.Invoke(rel);
+            stream.SetLength(kept.Length);
+            stream.Flush(true);
+            stream.Position = 0;
+            var check = new byte[stream.Length];
+            stream.ReadExactly(check);
+            if (!check.AsSpan().SequenceEqual(kept)) throw new CleanerException($"索引改写校验失败：{rel}");
+        }
+        catch (Exception error)
+        {
+            try
+            {
+                stream.Position = 0;
+                stream.Write(bytes);
+                stream.SetLength(bytes.Length);
+                stream.Flush(true);
+                stream.Position = 0;
+                var restored = new byte[stream.Length];
+                stream.ReadExactly(restored);
+                if (!restored.AsSpan().SequenceEqual(bytes)) throw new CleanerException("索引回滚内容不一致。");
+            }
+            catch (Exception rollback)
+            {
+                throw new CleanerException($"{error.Message} 索引回滚失败：{rollback.Message}。完整索引故障材料保留在 {backup.Directory}。", error);
+            }
+            throw new CleanerException($"{error.Message} 已在索引写入锁内还原并验证 {rel}。", error);
+        }
         return true;
     }
 
@@ -172,7 +235,7 @@ public sealed partial class Cleaner
         }
     }
 
-    private ExecuteResult Apply(PlanState plan, bool repair, IProgress<string>? progress)
+    private ExecuteResult Apply(PlanState plan, bool repair, IProgress<string>? progress, BackupPackage? backup)
     {
         var id = $"{DateTimeOffset.UtcNow:yyyy-MM-ddTHH-mm-ss-fffZ}-{Guid.NewGuid()}";
         var directory = Trash(id, true);
@@ -211,6 +274,11 @@ public sealed partial class Cleaner
             // Recheck after obtaining every SQLite write lock, closing the window
             // between the previous fingerprint check and BEGIN IMMEDIATE.
             AssertFingerprints(plan.Fingerprints);
+            if (backup is not null)
+            {
+                foreach (var (work, db, _) in opened) VerifyBackupRows(backup, db, work, plan.Public.Selection);
+                SetBackupStatus(backup, "applying");
+            }
             manifest.Status = "applying";
             WriteManifest(manifestPath, manifest);
             mutationStarted = true;
@@ -251,12 +319,13 @@ public sealed partial class Cleaner
             manifest.Status = "complete";
             manifest.CompletedAt = DateTimeOffset.UtcNow;
             WriteManifest(manifestPath, manifest);
+            if (backup is not null) SetBackupStatus(backup, "complete");
             complete = true;
             lock (gate) plans.Remove(plan.Public.Id);
             progress?.Report("正在清理临时文件");
             try { RemoveTransaction(id); }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException or CleanerException) { return new ExecuteResult(directory, e.Message); }
-            return new ExecuteResult(null, null);
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or CleanerException) { return new ExecuteResult(directory, e.Message) { BackupDirectory = backup?.Directory }; }
+            return new ExecuteResult(null, null) { BackupDirectory = backup?.Directory };
         }
         catch (Exception error) when (!complete)
         {
@@ -277,7 +346,7 @@ public sealed partial class Cleaner
                     TryWriteManifest(manifestPath, manifest);
                     throw new CleanerException($"{error.Message} {(mutationStarted ? "已自动还原并验证原有数据。" : "未开始清理。")}临时副本删除失败：{directory}。", error);
                 }
-                throw new CleanerException($"{error.Message} {(mutationStarted ? "已自动还原并验证原有数据，没有保留恢复副本。" : "未开始清理，临时副本已移除。")}", error);
+                throw new CleanerException($"{error.Message} {(mutationStarted ? "已自动还原并验证原有数据。" : "未开始清理，临时副本已移除。")}", error);
             }
             manifest.Status = "needs-recovery";
             manifest.Error = error.Message;

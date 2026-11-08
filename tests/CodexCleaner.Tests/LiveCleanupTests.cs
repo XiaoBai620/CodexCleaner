@@ -105,9 +105,15 @@ public sealed class LiveCleanupTests
         f.Cleaner.Hooks.BeforeCommit = n => { if (n == state) throw new IOException("Injected state commit failure"); };
         var message = Assert.Throws<CleanerException>(() => f.Cleaner.Execute(plan.Id)).Message;
         Assert.Contains("Injected state commit failure", message);
-        Assert.Contains("重新预览后可继续清理", message);
+        Assert.Contains("备份", message);
         Assert.Contains(f.Rows("state_5.sqlite", "threads"), r => (string)r["id"]! == Ids[0]);
         f.Cleaner.Hooks.BeforeCommit = null;
+        Assert.Throws<CleanerException>(() => f.Cleaner.Execute(f.Cleaner.PlanCleanup(new Selection([Ids[0]])).Id));
+        var backup = Assert.Single(f.Cleaner.Backups());
+        Assert.True(backup.NeedsRecovery);
+        f.Running = false;
+        f.Cleaner.RecoverBackup(backup.Path);
+        f.Running = true;
         f.Cleaner.Execute(f.Cleaner.PlanCleanup(new Selection([Ids[0]])).Id);
         Assert.Equal(1, ThreadCount(f));
     }

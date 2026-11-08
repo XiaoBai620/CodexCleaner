@@ -35,6 +35,7 @@ internal sealed class MainForm : Form
     private readonly Button selectAll = DesktopTheme.Button("全选结果");
     private readonly Button clearSelection = DesktopTheme.Button("清空选择");
     private readonly Button refresh = DesktopTheme.Button("刷新");
+    private readonly Button backups = DesktopTheme.Button("备份与恢复");
     private readonly Button repair = DesktopTheme.Button("检查失效引用");
     private readonly Button preview = DesktopTheme.Button("预览清理范围  →", primary: true);
     private readonly Label summary = DesktopTheme.Label("尚未选择清理内容", 11f, true);
@@ -115,6 +116,7 @@ internal sealed class MainForm : Form
         clearMemories.CheckedChanged += (_, _) => RenderSelection();
         clearShared.CheckedChanged += (_, _) => RenderSelection();
         refresh.Click += async (_, _) => await Reload();
+        backups.Click += async (_, _) => await ShowBackups();
         checkUpdates.Click += async (_, _) => await CheckForUpdates(manual: true);
         downloadUpdate.Click += (_, _) => OpenUpdate();
         repair.Click += async (_, _) => await PreviewRepair();
@@ -156,6 +158,7 @@ internal sealed class MainForm : Form
         };
         tip.SetToolTip(search, "搜索标题或会话 ID · Ctrl+F");
         tip.SetToolTip(refresh, "重新读取本地记录 · F5");
+        tip.SetToolTip(backups, "查看删除前保留的备份；退出 Codex 后可恢复聊天，也可删除旧备份。");
         tip.SetToolTip(clearSearch, "清除搜索");
         tip.SetToolTip(repair, "检查已删除会话留下的本地界面引用；先预览，再确认修复。");
         tip.SetToolTip(expandDetails, "在独立窗口查看完整标题、路径和处理原因");
@@ -297,9 +300,10 @@ internal sealed class MainForm : Form
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
         panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        var titleRow = CreateLayout(3, 1);
+        var titleRow = CreateLayout(4, 1);
         titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 60));
         titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         titleRow.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         var title = DesktopTheme.Label("会话", 11f, true);
@@ -309,9 +313,12 @@ internal sealed class MainForm : Form
         listCount.TextAlign = ContentAlignment.MiddleLeft;
         listCount.AutoEllipsis = true;
         refresh.Anchor = AnchorStyles.Right;
+        backups.Anchor = AnchorStyles.Right;
+        backups.Margin = new Padding(0, 0, 4, 0);
         titleRow.Controls.Add(title, 0, 0);
         titleRow.Controls.Add(listCount, 1, 0);
-        titleRow.Controls.Add(refresh, 2, 0);
+        titleRow.Controls.Add(backups, 2, 0);
+        titleRow.Controls.Add(refresh, 3, 0);
         panel.Controls.Add(titleRow, 0, 0);
 
         var searchRow = CreateLayout(2, 1);
@@ -661,6 +668,7 @@ internal sealed class MainForm : Form
         preview.Text = busy ? "正在处理…" : "预览清理范围  →";
         repair.Enabled = !busy && !recoveryBlocked && caps?.RepairReferences == true;
         refresh.Enabled = search.Enabled = filter.Enabled = list.Enabled = !busy;
+        backups.Enabled = !busy;
         clearSearch.Enabled = !busy && search.TextLength > 0;
         clearSearch.Visible = search.TextLength > 0;
         // Clearing every chat's memories or shared history touches files Codex keeps writing.
@@ -726,6 +734,18 @@ internal sealed class MainForm : Form
     }
 
     private Task Reload() => Run("正在读取本地会话", LoadState);
+
+    private Task ShowBackups() => Run("正在打开备份", async () =>
+    {
+        StopActivity();
+        UseWaitCursor = false;
+        using var dialog = new BackupDialog(cleaner);
+        dialog.ShowDialog(this);
+        if (!dialog.Changed) return;
+        UseWaitCursor = true;
+        StartActivity("正在刷新会话列表");
+        await LoadState();
+    });
 
     private async Task LoadState()
     {
@@ -841,7 +861,9 @@ internal sealed class MainForm : Form
             AllowRecordOnly = state?.Chats.Any(c => selected.Contains(c.Id) && c.CanRemoveRecord) == true,
         };
         var plan = await Task.Run(() => cleaner.PlanCleanup(selection));
-        if (!Confirm(plan)) return;
+        SetActivity("正在估算备份空间");
+        var backupBytes = await Task.Run(() => cleaner.EstimateBackupBytes(plan.Id));
+        if (!Confirm(plan, backupBytes)) return;
         StartActivity("正在执行清理");
         var stages = new Progress<string>(SetActivity);
         var result = await Task.Run(() => cleaner.Execute(plan.Id, stages));
@@ -866,16 +888,17 @@ internal sealed class MainForm : Form
         await Done(await Task.Run(() => cleaner.ExecuteRepair(plan.Id, stages)), "失效引用已修复，可以重新启动 Codex 检查项目和归档。");
     });
 
-    private bool Confirm(Plan plan)
+    private bool Confirm(Plan plan, long? estimatedBackupBytes = null)
     {
         StopActivity();
         UseWaitCursor = false;
-        try { using var dialog = new ConfirmDialog(plan, cleaner.CheckProcesses); return dialog.ShowDialog(this) == DialogResult.OK; }
+        try { using var dialog = new ConfirmDialog(plan, cleaner.CheckProcesses, estimatedBackupBytes); return dialog.ShowDialog(this) == DialogResult.OK; }
         finally { if (!IsDisposed) UseWaitCursor = true; }
     }
 
     private async Task Done(ExecuteResult result, string message)
     {
+        if (result.BackupDirectory is not null) message += $"\n\n删除前的备份已保留：{result.BackupDirectory}\n退出 Codex 后，可在“备份与恢复”中找回。";
         if (result.ResidualDirectory is not null) message += $"\n\n临时事务副本未能完全删除：{result.ResidualDirectory}\n{result.ResidualError}";
         SetActivity("正在刷新会话列表");
         await LoadState();
