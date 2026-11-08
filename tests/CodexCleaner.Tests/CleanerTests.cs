@@ -38,6 +38,61 @@ public sealed class CleanerTests
 
     private static void Execute(Fixture f, Selection selection) => f.Cleaner.Execute(f.Cleaner.PlanCleanup(selection).Id);
 
+    private sealed class StageProgress : IProgress<string>
+    {
+        public List<string> Stages { get; } = [];
+        public void Report(string value) => Stages.Add(value);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void OfflineCleanupAndRepairReportStagesInOrder(bool repair)
+    {
+        using var f = new Fixture();
+        if (repair) AddDesktopReferences(f, Stale);
+        var plan = repair ? f.Cleaner.PlanRepair() : f.Cleaner.PlanCleanup(Pick(Ids[0]));
+        var progress = new StageProgress();
+        f.Cleaner.Hooks.AfterBackupCopy = (_, _) => Assert.Equal("正在备份数据库和文件", progress.Stages[^1]);
+        if (repair) f.Cleaner.ExecuteRepair(plan.Id, progress);
+        else f.Cleaner.Execute(plan.Id, progress);
+        string[] expected =
+        [
+            repair ? "正在锁定修复范围" : "正在锁定所选会话",
+            "正在备份数据库和文件", "正在校验备份",
+            repair ? "正在修复失效引用" : "正在删除所选内容",
+            "正在校验清理结果", "正在清理临时文件",
+        ];
+        Assert.Equal(expected, progress.Stages);
+        Assert.Equal(repair ? 2 : 1, ThreadCount(f));
+        if (repair) Assert.True(f.Cleaner.PlanRepair().IsEmpty);
+        else AssertGone(f, Ids[0]);
+        f.AssertNoTransactions();
+    }
+
+    [Fact]
+    public void LiveCleanupReportsStagesAndCommitsTheThreadDatabaseLast()
+    {
+        using var f = new Fixture();
+        f.Running = true;
+        var plan = f.Cleaner.PlanCleanup(Pick(Ids[0]));
+        var progress = new StageProgress();
+        var before = Linked(f, Ids[1]);
+        f.Cleaner.Hooks.BeforeDelete = _ => Assert.Equal("正在删除会话文件", progress.Stages[^1]);
+        f.Cleaner.Execute(plan.Id, progress);
+        var expected = new List<string> { "正在占用会话整理锁和写入锁", "正在复查所选会话" };
+        var index = 0;
+        foreach (var db in plan.Databases.Where(d => d.Path != "state_5.sqlite"))
+            expected.Add($"正在清理数据库（第 {++index}/共 {plan.Databases.Count} 个）：{db.Path}");
+        expected.AddRange(["正在删除会话文件", "正在更新索引", $"正在清理数据库（第 {++index}/共 {plan.Databases.Count} 个）：state_5.sqlite"]);
+        Assert.Equal(expected, progress.Stages);
+        AssertGone(f, Ids[0]);
+        Assert.Equal(before, Linked(f, Ids[1]));
+        Assert.False(File.Exists(f.RolloutPaths[0]));
+        Assert.DoesNotContain(Ids[0], File.ReadAllText(f.Data("history.jsonl")));
+        f.AssertNoTransactions();
+    }
+
     [Fact]
     public void PreviewIsReadOnlyAndEnumeratesSyntheticChats()
     {

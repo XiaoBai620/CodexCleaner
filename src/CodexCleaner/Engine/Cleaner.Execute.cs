@@ -6,14 +6,14 @@ namespace CodexCleaner.Engine;
 
 public sealed partial class Cleaner
 {
-    public ExecuteResult Execute(string planId)
+    public ExecuteResult Execute(string planId, IProgress<string>? progress = null)
     {
         PlanState? plan;
         lock (gate) plans.TryGetValue(planId, out plan);
-        return plan?.Public.Live == true ? Exclusive(() => RunLive(planId), live: true) : Run(planId, repair: false);
+        return plan?.Public.Live == true ? Exclusive(() => RunLive(planId, progress), live: true) : Run(planId, repair: false, progress);
     }
 
-    public ExecuteResult ExecuteRepair(string planId) => Run(planId, repair: true);
+    public ExecuteResult ExecuteRepair(string planId, IProgress<string>? progress = null) => Run(planId, repair: true, progress);
 
     private PlanState TakePlan(string planId, bool repair, bool live)
     {
@@ -44,8 +44,9 @@ public sealed partial class Cleaner
                 throw new CleanerException($"聊天「{chat.Title}」在预览后新增了会话文件，请重新预览：{added}");
     }
 
-    private ExecuteResult Run(string planId, bool repair) => Exclusive(() =>
+    private ExecuteResult Run(string planId, bool repair, IProgress<string>? progress) => Exclusive(() =>
     {
+        progress?.Report(repair ? "正在锁定修复范围" : "正在锁定所选会话");
         var plan = TakePlan(planId, repair, live: false);
         AssertFingerprints(plan.Fingerprints);
         if (repair)
@@ -58,20 +59,22 @@ public sealed partial class Cleaner
         if (plan.Public.Selection.ClearMemories && !MemoryFiles().SequenceEqual(plan.MemoryPaths)) throw new CleanerException("记忆文件列表在预览后改变，请重新预览。");
         // Holding the writer locks keeps a Codex that starts mid-cleanup from opening these chats.
         using var locks = ThreadLocks.Acquire(ThreadLockRoot(), repair ? [] : plan.Public.Selection.ChatIds);
-        return Apply(plan, repair);
+        return Apply(plan, repair, progress);
     });
 
     // Runs beside Codex. Every selected chat's writer lock is held, so Codex cannot load, resume or
     // append to it; shared databases keep receiving Codex writes for other chats, so each database
     // commits its own transaction instead of being restored from a file copy. The thread row in
     // state_5.sqlite goes last: if an earlier step fails the chat stays listed and can be retried.
-    private ExecuteResult RunLive(string planId)
+    private ExecuteResult RunLive(string planId, IProgress<string>? progress)
     {
         var plan = TakePlan(planId, repair: false, live: true);
         var ids = plan.Public.Selection.ChatIds;
+        progress?.Report("正在占用会话整理锁和写入锁");
         using var maintenance = RolloutMaintenanceLock();
         using var locks = ThreadLocks.Acquire(ThreadLockRoot(), ids);
         Hooks.AfterThreadLocks?.Invoke();
+        progress?.Report("正在复查所选会话");
         AssertFingerprints(plan.Fingerprints);
         AssertStillAllowed(plan);
         using (var state = Db.Open(Data("state_5.sqlite"), writable: false))
@@ -83,15 +86,27 @@ public sealed partial class Cleaner
         var commits = 0;
         try
         {
-            foreach (var work in plan.Databases.Where(d => d.Path != "state_5.sqlite")) { CommitLive(work, ++commits); done.Add(work.Path); }
+            foreach (var work in plan.Databases.Where(d => d.Path != "state_5.sqlite"))
+            {
+                progress?.Report($"正在清理数据库（第 {commits + 1}/共 {plan.Databases.Count} 个）：{work.Path}");
+                CommitLive(work, ++commits);
+                done.Add(work.Path);
+            }
+            progress?.Report("正在删除会话文件");
             foreach (var file in plan.Files.Where(f => f.Remove))
             {
                 Hooks.BeforeDelete?.Invoke(Data(file.Path));
                 File.Delete(Data(file.Path));
                 done.Add(file.Path);
             }
+            progress?.Report("正在更新索引");
             foreach (var rel in IndexFiles) if (RewriteIndexLive(rel, selected)) done.Add(rel);
-            foreach (var work in plan.Databases.Where(d => d.Path == "state_5.sqlite")) { CommitLive(work, ++commits); done.Add(work.Path); }
+            foreach (var work in plan.Databases.Where(d => d.Path == "state_5.sqlite"))
+            {
+                progress?.Report($"正在清理数据库（第 {commits + 1}/共 {plan.Databases.Count} 个）：{work.Path}");
+                CommitLive(work, ++commits);
+                done.Add(work.Path);
+            }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or SqliteException or CleanerException or InvalidOperationException)
         {
@@ -157,7 +172,7 @@ public sealed partial class Cleaner
         }
     }
 
-    private ExecuteResult Apply(PlanState plan, bool repair)
+    private ExecuteResult Apply(PlanState plan, bool repair, IProgress<string>? progress)
     {
         var id = $"{DateTimeOffset.UtcNow:yyyy-MM-ddTHH-mm-ss-fffZ}-{Guid.NewGuid()}";
         var directory = Trash(id, true);
@@ -169,6 +184,7 @@ public sealed partial class Cleaner
         bool mutationStarted = false, complete = false;
         try
         {
+            progress?.Report("正在备份数据库和文件");
             foreach (var f in plan.Files)
                 manifest.Files.Add(new ManifestItem { Path = f.Path, Action = f.Remove ? "remove" : "rewrite", Backup = CopyToBackup(id, f.Path), Original = plan.Fingerprints[f.Path] });
             foreach (var d in plan.Databases)
@@ -181,6 +197,7 @@ public sealed partial class Cleaner
                 using (var target = new SqliteConnection($"Data Source={backupPath};Pooling=False")) db.BackupDatabase(target);
                 manifest.Databases.Add(new ManifestItem { Path = d.Path, Backup = backupRel });
             }
+            progress?.Report("正在校验备份");
             foreach (var item in manifest.Files.Concat(manifest.Databases))
             {
                 item.BackupFingerprint = FingerprintOf(directory, item.Backup);
@@ -197,6 +214,7 @@ public sealed partial class Cleaner
             manifest.Status = "applying";
             WriteManifest(manifestPath, manifest);
             mutationStarted = true;
+            progress?.Report(repair ? "正在修复失效引用" : "正在删除所选内容");
             foreach (var (work, db, _) in opened)
             {
                 Db.Exec(db, "PRAGMA secure_delete=ON");
@@ -216,6 +234,7 @@ public sealed partial class Cleaner
                 opened[i].Transaction!.Dispose();
                 opened[i] = opened[i] with { Transaction = null };
             }
+            progress?.Report("正在校验清理结果");
             foreach (var (work, db, _) in opened)
             {
                 Db.Exec(db, "PRAGMA wal_checkpoint(TRUNCATE)");
@@ -234,6 +253,7 @@ public sealed partial class Cleaner
             WriteManifest(manifestPath, manifest);
             complete = true;
             lock (gate) plans.Remove(plan.Public.Id);
+            progress?.Report("正在清理临时文件");
             try { RemoveTransaction(id); }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException or CleanerException) { return new ExecuteResult(directory, e.Message); }
             return new ExecuteResult(null, null);
@@ -244,7 +264,7 @@ public sealed partial class Cleaner
             Exception? rollbackError = null;
             if (mutationStarted)
             {
-                try { ProcessGuard(); RollbackTransaction(manifest, directory); }
+                try { progress?.Report("正在还原原有数据"); ProcessGuard(); RollbackTransaction(manifest, directory); }
                 catch (Exception e) { rollbackError = e; }
             }
             if (rollbackError is null)

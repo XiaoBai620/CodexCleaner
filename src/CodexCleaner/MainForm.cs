@@ -49,11 +49,13 @@ internal sealed class MainForm : Form
     private readonly CheckBox clearShared = new() { Text = "共享输入历史与日志", AutoSize = true, ForeColor = DesktopTheme.Ink, Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold), AccessibleDescription = "可选，会影响所有聊天的共享历史与日志" };
     private readonly ToolTip tip = new() { AutoPopDelay = 20000, InitialDelay = 400, ReshowDelay = 100, ShowAlways = true };
     private readonly System.Windows.Forms.Timer processTimer = new() { Interval = 3000 };
+    private readonly System.Windows.Forms.Timer busyTimer = new() { Interval = 500 };
+    private readonly Stopwatch busyClock = new();
     private Snapshot? state;
     private List<string> diagnostics = [];
     private string? focusedChatId;
     private bool busy, rendering, checkingProcess;
-    private string activity = "正在处理…";
+    private string activity = "正在处理";
 
     public MainForm(Cleaner cleaner, IUpdateChecker? updateChecker = null, Action<Uri>? openReleasePage = null)
     {
@@ -125,6 +127,7 @@ internal sealed class MainForm : Form
             catch (ExternalException) { MessageBox.Show(this, "剪贴板暂时被其他程序占用，请稍后重试。", "无法复制", MessageBoxButtons.OK, MessageBoxIcon.Information); }
         };
         processTimer.Tick += async (_, _) => await RefreshProcessState();
+        busyTimer.Tick += (_, _) => RenderActivity();
         Shown += async (_, _) =>
         {
             ApplyGridMetrics();
@@ -642,7 +645,7 @@ internal sealed class MainForm : Form
         if (selected.Count > 0) parts.Add($"已选 {selected.Count} 条会话");
         if (clearMemories.Checked) parts.Add("全部本地记忆");
         if (clearShared.Checked) parts.Add("共享历史与日志");
-        summary.Text = busy ? activity : parts.Count > 0 ? string.Join("  +  ", parts) : "尚未选择清理内容";
+        summary.Text = busy ? ActivityText : parts.Count > 0 ? string.Join("  +  ", parts) : "尚未选择清理内容";
         var notes = new List<string>();
         if (hidden > 0) notes.Add($"筛选外仍有 {hidden} 条已选");
         if (recordOnly > 0) notes.Add($"{recordOnly} 条仅清理本地记录，保留原文件");
@@ -672,7 +675,7 @@ internal sealed class MainForm : Form
     {
         if (busy) return;
         busy = true;
-        activity = label;
+        StartActivity(label);
         UseWaitCursor = true;
         RenderSelection();
         try
@@ -682,16 +685,47 @@ internal sealed class MainForm : Form
         }
         catch (Exception e) when (e is CleanerException or IOException or UnauthorizedAccessException or Microsoft.Data.Sqlite.SqliteException)
         {
+            StopActivity();
             if (!IsDisposed) MessageBox.Show(this, e.Message, "操作未完成", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally
         {
             busy = false;
+            StopActivity();
             if (!IsDisposed) { UseWaitCursor = false; RenderSelection(); }
         }
     }
 
-    private Task Reload() => Run("正在读取本地会话…", LoadState);
+    private string ActivityText => $"{activity}…  {busyClock.Elapsed.TotalSeconds:0} 秒";
+
+    private void RenderActivity()
+    {
+        if (IsDisposed || !busy) return;
+        summary.Text = ActivityText;
+        tip.SetToolTip(summary, summary.Text);
+    }
+
+    private void SetActivity(string label)
+    {
+        if (IsDisposed || !busy || !busyClock.IsRunning) return;
+        activity = label;
+        RenderActivity();
+    }
+
+    private void StartActivity(string label)
+    {
+        busyClock.Restart();
+        SetActivity(label);
+        busyTimer.Start();
+    }
+
+    private void StopActivity()
+    {
+        busyClock.Stop();
+        busyTimer.Stop();
+    }
+
+    private Task Reload() => Run("正在读取本地会话", LoadState);
 
     private async Task LoadState()
     {
@@ -800,7 +834,7 @@ internal sealed class MainForm : Form
         dialog.ShowDialog(this);
     }
 
-    private Task PreviewCleanup() => Run("正在生成清理预览…", async () =>
+    private Task PreviewCleanup() => Run("正在生成清理预览", async () =>
     {
         var selection = new Selection([.. selected], clearMemories.Checked, clearShared.Checked)
         {
@@ -808,31 +842,33 @@ internal sealed class MainForm : Form
         };
         var plan = await Task.Run(() => cleaner.PlanCleanup(selection));
         if (!Confirm(plan)) return;
-        activity = "正在执行清理，请稍候…";
-        RenderSelection();
-        var result = await Task.Run(() => cleaner.Execute(plan.Id));
+        StartActivity("正在执行清理");
+        var stages = new Progress<string>(SetActivity);
+        var result = await Task.Run(() => cleaner.Execute(plan.Id, stages));
         selected.Clear();
         clearMemories.Checked = clearShared.Checked = false;
         await Done(result, (plan.Chats.Any(c => c.CanRemoveRecord) ? "所选本地记录已清理。预览中标明保留的原会话文件未被删除。" : "所选内容已清理完成。")
             + (plan.Live ? "\n\nCodex 运行期间没有修改桌面界面状态。退出 Codex 后点击「检查失效引用」，可清除置顶、草稿等残留引用。" : ""));
     });
 
-    private Task PreviewRepair() => Run("正在检查失效引用…", async () =>
+    private Task PreviewRepair() => Run("正在检查失效引用", async () =>
     {
         var plan = await Task.Run(cleaner.PlanRepair);
         if (plan.IsEmpty || (plan.ReferenceRepairs == 0 && plan.Files.Count == 0 && plan.DatabaseRows == 0))
         {
+            StopActivity();
             MessageBox.Show(this, "检查完成，没有发现可修复的失效引用。\n\n列表中的“仅清理记录”会话，可直接勾选后预览清理。", "检查完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
         if (!Confirm(plan)) return;
-        activity = "正在修复失效引用…";
-        RenderSelection();
-        await Done(await Task.Run(() => cleaner.ExecuteRepair(plan.Id)), "失效引用已修复，可以重新启动 Codex 检查项目和归档。");
+        StartActivity("正在修复失效引用");
+        var stages = new Progress<string>(SetActivity);
+        await Done(await Task.Run(() => cleaner.ExecuteRepair(plan.Id, stages)), "失效引用已修复，可以重新启动 Codex 检查项目和归档。");
     });
 
     private bool Confirm(Plan plan)
     {
+        StopActivity();
         UseWaitCursor = false;
         try { using var dialog = new ConfirmDialog(plan, cleaner.CheckProcesses); return dialog.ShowDialog(this) == DialogResult.OK; }
         finally { if (!IsDisposed) UseWaitCursor = true; }
@@ -841,7 +877,9 @@ internal sealed class MainForm : Form
     private async Task Done(ExecuteResult result, string message)
     {
         if (result.ResidualDirectory is not null) message += $"\n\n临时事务副本未能完全删除：{result.ResidualDirectory}\n{result.ResidualError}";
+        SetActivity("正在刷新会话列表");
         await LoadState();
+        StopActivity();
         MessageBox.Show(this, message, "处理完成", MessageBoxButtons.OK, result.ResidualDirectory is null ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
     }
 
@@ -853,6 +891,8 @@ internal sealed class MainForm : Form
             updateCancellation.Dispose();
             processTimer.Stop();
             processTimer.Dispose();
+            StopActivity();
+            busyTimer.Dispose();
             tip.Dispose();
         }
         base.Dispose(disposing);
