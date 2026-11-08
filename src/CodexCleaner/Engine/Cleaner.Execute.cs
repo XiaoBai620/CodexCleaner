@@ -6,22 +6,26 @@ namespace CodexCleaner.Engine;
 
 public sealed partial class Cleaner
 {
-    public ExecuteResult Execute(string planId) => Run(planId, repair: false);
-    public ExecuteResult ExecuteRepair(string planId) => Run(planId, repair: true);
-
-    private ExecuteResult Run(string planId, bool repair) => Exclusive(() =>
+    public ExecuteResult Execute(string planId)
     {
         PlanState? plan;
         lock (gate) plans.TryGetValue(planId, out plan);
-        if (plan is null || plan.Expires < DateTimeOffset.Now || plan.Public.Repair != repair) throw new CleanerException("清理预览无效或已过期，请重新预览。");
+        return plan?.Public.Live == true ? Exclusive(() => RunLive(planId), live: true) : Run(planId, repair: false);
+    }
+
+    public ExecuteResult ExecuteRepair(string planId) => Run(planId, repair: true);
+
+    private PlanState TakePlan(string planId, bool repair, bool live)
+    {
+        PlanState? plan;
+        lock (gate) plans.TryGetValue(planId, out plan);
+        if (plan is null || plan.Expires < DateTimeOffset.Now || plan.Public.Repair != repair || plan.Public.Live != live) throw new CleanerException("清理预览无效或已过期，请重新预览。");
         if (RecoveryIssues().Any(x => x.BlocksWrites)) throw new CleanerException("上次清理异常中断，尚有未验证的故障材料。为防止覆盖数据，本次未执行；请查看故障路径。");
-        AssertFingerprints(plan.Fingerprints);
-        if (repair)
-        {
-            using var db = Db.Open(Data("state_5.sqlite"), writable: false);
-            foreach (var id in plan.Public.Selection.ChatIds)
-                if (Db.Scalar(db, "SELECT 1 FROM threads WHERE id=$p0", [id]) is not null) throw new CleanerException("待修复引用对应的聊天已重新出现，请重新检查；本次未删除现有聊天。");
-        }
+        return plan;
+    }
+
+    private void AssertStillAllowed(PlanState plan)
+    {
         var latest = InspectDatabases();
         foreach (var (rel, info) in latest)
             if (info is { Present: true, Supported: false }) throw new CleanerException($"数据库无法安全写入：{rel}：{info.Reason ?? "结构未验证"}");
@@ -30,9 +34,128 @@ public sealed partial class Cleaner
         var targets = AutomationTargets(latest, automationFiles);
         foreach (var id in plan.Public.Selection.ChatIds)
             if (targets.TryGetValue(id, out var labels)) throw new CleanerException($"聊天被自动化 {string.Join('、', labels)} 引用，请先在 Codex 中处理该任务。");
+        if (plan.Public.Repair) return;
+        // Forks created after the preview would lose their history base.
+        var rollouts = ScanRollouts();
+        AssertNoExternalForks(plan.Public.Chats, rollouts, plan.Public.Chats);
+        var planned = plan.Files.Where(f => f.Remove).Select(f => f.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var chat in plan.Public.Chats.Where(c => !c.CanRemoveRecord))
+            if (rollouts.FilesOf(chat.Id).FirstOrDefault(rel => !planned.Contains(rel)) is { } added)
+                throw new CleanerException($"聊天「{chat.Title}」在预览后新增了会话文件，请重新预览：{added}");
+    }
+
+    private ExecuteResult Run(string planId, bool repair) => Exclusive(() =>
+    {
+        var plan = TakePlan(planId, repair, live: false);
+        AssertFingerprints(plan.Fingerprints);
+        if (repair)
+        {
+            using var db = Db.Open(Data("state_5.sqlite"), writable: false);
+            foreach (var id in plan.Public.Selection.ChatIds)
+                if (Db.Scalar(db, "SELECT 1 FROM threads WHERE id=$p0", [id]) is not null) throw new CleanerException("待修复引用对应的聊天已重新出现，请重新检查；本次未删除现有聊天。");
+        }
+        AssertStillAllowed(plan);
         if (plan.Public.Selection.ClearMemories && !MemoryFiles().SequenceEqual(plan.MemoryPaths)) throw new CleanerException("记忆文件列表在预览后改变，请重新预览。");
+        // Holding the writer locks keeps a Codex that starts mid-cleanup from opening these chats.
+        using var locks = ThreadLocks.Acquire(ThreadLockRoot(), repair ? [] : plan.Public.Selection.ChatIds);
         return Apply(plan, repair);
     });
+
+    // Runs beside Codex. Every selected chat's writer lock is held, so Codex cannot load, resume or
+    // append to it; shared databases keep receiving Codex writes for other chats, so each database
+    // commits its own transaction instead of being restored from a file copy. The thread row in
+    // state_5.sqlite goes last: if an earlier step fails the chat stays listed and can be retried.
+    private ExecuteResult RunLive(string planId)
+    {
+        var plan = TakePlan(planId, repair: false, live: true);
+        var ids = plan.Public.Selection.ChatIds;
+        using var maintenance = RolloutMaintenanceLock();
+        using var locks = ThreadLocks.Acquire(ThreadLockRoot(), ids);
+        Hooks.AfterThreadLocks?.Invoke();
+        AssertFingerprints(plan.Fingerprints);
+        AssertStillAllowed(plan);
+        using (var state = Db.Open(Data("state_5.sqlite"), writable: false))
+            foreach (var (id, stamp) in UpdatedStamps(state, ids))
+                if (stamp != plan.Updated[id]) throw new CleanerException($"聊天 {id} 在预览后有新的变化，请重新预览。");
+        lock (gate) plans.Remove(planId);
+        var selected = ids.ToHashSet(StringComparer.Ordinal);
+        var done = new List<string>();
+        var commits = 0;
+        try
+        {
+            foreach (var work in plan.Databases.Where(d => d.Path != "state_5.sqlite")) { CommitLive(work, ++commits); done.Add(work.Path); }
+            foreach (var file in plan.Files.Where(f => f.Remove))
+            {
+                Hooks.BeforeDelete?.Invoke(Data(file.Path));
+                File.Delete(Data(file.Path));
+                done.Add(file.Path);
+            }
+            foreach (var rel in IndexFiles) if (RewriteIndexLive(rel, selected)) done.Add(rel);
+            foreach (var work in plan.Databases.Where(d => d.Path == "state_5.sqlite")) { CommitLive(work, ++commits); done.Add(work.Path); }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or SqliteException or CleanerException or InvalidOperationException)
+        {
+            throw new CleanerException(done.Count == 0
+                ? $"{e.Message} 未修改任何数据。"
+                : $"{e.Message} 出错的数据库已回滚；已完成：{string.Join('、', done)}。聊天仍保留在列表中，重新预览后可继续清理。", e);
+        }
+        return new ExecuteResult(null, null);
+    }
+
+    private void CommitLive(DatabaseWork work, int index)
+    {
+        using var db = Db.Open(Data(work.Path), writable: true, busySeconds: 10);
+        Db.Exec(db, "PRAGMA secure_delete=ON");
+        using var transaction = db.BeginTransaction(deferred: false);
+        foreach (var action in work.Actions) Db.Exec(db, ActionSql(action), action.Args);
+        AssertActionsApplied(db, work);
+        Hooks.BeforeCommit?.Invoke(index);
+        transaction.Commit();
+    }
+
+    // Codex appends history.jsonl under an exclusive LockFileEx lock (codex-rs/message-history);
+    // holding the same lock makes the in-place rewrite exclusive with its writers and readers.
+    private bool RewriteIndexLive(string rel, IReadOnlySet<string> ids)
+    {
+        if (Stat(rel) is not { } entry) return false;
+        if (entry is not FileInfo file || file.Length > Catalog.MaxJsonBytes || !IndependentFile(file)) throw new CleanerException($"索引太大或类型未知：{rel}");
+        using var stream = new FileStream(file.FullName, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete);
+        ThreadLocks.Wait(stream, $"Codex 正在写入 {rel}，请稍后重试。");
+        var bytes = new byte[stream.Length];
+        stream.ReadExactly(bytes);
+        if (WithoutIds(rel, bytes, ids) is not { } kept) return false;
+        stream.Position = 0;
+        stream.Write(kept);
+        stream.SetLength(kept.Length);
+        stream.Flush(true);
+        return true;
+    }
+
+    // Rollout compression and migration replace rollout files under this lock (codex-rs/rollout/src/maintenance.rs).
+    private FileStream RolloutMaintenanceLock()
+    {
+        Directory.CreateDirectory(Data(".tmp", missing: true));
+        var stream = new FileStream(Data(".tmp/rollout-maintenance.lock", missing: true), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete);
+        if (ThreadLocks.TryLock(stream)) return stream;
+        stream.Dispose();
+        throw new CleanerException("Codex 正在整理会话文件（压缩或迁移），请稍后重试。");
+    }
+
+    private static string ActionSql(SqlAction action) => action.Kind switch
+    {
+        ActionKind.CatalogRevision => "INSERT INTO local_thread_catalog_metadata (id,catalog_revision) VALUES (1,1) ON CONFLICT(id) DO UPDATE SET catalog_revision=catalog_revision+1",
+        ActionKind.ClearReference => $"UPDATE {Db.Quote(action.Table)} SET {Db.Quote(action.Column!)} = NULL WHERE {action.Where}",
+        _ => $"DELETE FROM {Db.Quote(action.Table)} WHERE {action.Where}",
+    };
+
+    private static void AssertActionsApplied(SqliteConnection db, DatabaseWork work)
+    {
+        foreach (var action in work.Actions.Where(a => a.Kind != ActionKind.CatalogRevision))
+        {
+            var check = action.Kind == ActionKind.ClearReference ? $"{action.Where} AND {Db.Quote(action.Column!)} IS NOT NULL" : action.Where;
+            if (Db.Count(db, action.Table, check, action.Args) > 0) throw new CleanerException($"清理结果校验失败：{work.Path}/{action.Table}");
+        }
+    }
 
     private ExecuteResult Apply(PlanState plan, bool repair)
     {
@@ -77,16 +200,7 @@ public sealed partial class Cleaner
             foreach (var (work, db, _) in opened)
             {
                 Db.Exec(db, "PRAGMA secure_delete=ON");
-                foreach (var action in work.Actions)
-                {
-                    var sql = action.Kind switch
-                    {
-                        ActionKind.CatalogRevision => "INSERT INTO local_thread_catalog_metadata (id,catalog_revision) VALUES (1,1) ON CONFLICT(id) DO UPDATE SET catalog_revision=catalog_revision+1",
-                        ActionKind.ClearReference => $"UPDATE {Db.Quote(action.Table)} SET {Db.Quote(action.Column!)} = NULL WHERE {action.Where}",
-                        _ => $"DELETE FROM {Db.Quote(action.Table)} WHERE {action.Where}",
-                    };
-                    Db.Exec(db, sql, action.Args);
-                }
+                foreach (var action in work.Actions) Db.Exec(db, ActionSql(action), action.Args);
             }
             foreach (var f in plan.Files)
             {
@@ -105,11 +219,7 @@ public sealed partial class Cleaner
             foreach (var (work, db, _) in opened)
             {
                 Db.Exec(db, "PRAGMA wal_checkpoint(TRUNCATE)");
-                foreach (var action in work.Actions.Where(a => a.Kind != ActionKind.CatalogRevision))
-                {
-                    var check = action.Kind == ActionKind.ClearReference ? $"{action.Where} AND {Db.Quote(action.Column!)} IS NOT NULL" : action.Where;
-                    if (Db.Count(db, action.Table, check, action.Args) > 0) throw new CleanerException($"清理结果校验失败：{work.Path}/{action.Table}");
-                }
+                AssertActionsApplied(db, work);
                 if (Db.Scalar(db, "PRAGMA quick_check") as string != "ok") throw new CleanerException($"数据库一致性校验失败：{work.Path}");
             }
             CloseAll(opened);

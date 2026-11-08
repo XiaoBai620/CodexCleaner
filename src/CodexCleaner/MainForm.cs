@@ -43,6 +43,8 @@ internal sealed class MainForm : Form
     private readonly TextBox details = new() { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, BorderStyle = BorderStyle.None, ScrollBars = ScrollBars.Vertical, WordWrap = true, BackColor = Color.White, ForeColor = DesktopTheme.Ink, Font = new Font("Microsoft YaHei UI", 9f), AccessibleName = "会话完整详情，可选择并复制" };
     private readonly Button copyDetails = DesktopTheme.Button("复制");
     private readonly Button expandDetails = DesktopTheme.Button("展开");
+    private readonly Button viewConversation = DesktopTheme.Button("查看对话");
+    private bool codexRunning;
     private readonly CheckBox clearMemories = new() { Text = "全部本地记忆", AutoSize = true, ForeColor = DesktopTheme.Ink, Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold), AccessibleDescription = "可选，会清空所有聊天的合并记忆" };
     private readonly CheckBox clearShared = new() { Text = "共享输入历史与日志", AutoSize = true, ForeColor = DesktopTheme.Ink, Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold), AccessibleDescription = "可选，会影响所有聊天的共享历史与日志" };
     private readonly ToolTip tip = new() { AutoPopDelay = 20000, InitialDelay = 400, ReshowDelay = 100, ShowAlways = true };
@@ -90,12 +92,14 @@ internal sealed class MainForm : Form
         root.Controls.Add(BuildFooter(), 0, 3);
         Controls.Add(root);
 
-        filter.Items.AddRange(["全部会话", "可清理", "仅清理记录", "受保护", "已归档"]);
+        filter.Items.AddRange(["全部会话", "可清理", "仅清理记录", "受保护", "使用中", "已归档"]);
         filter.SelectedIndex = 0;
         search.TextChanged += (_, _) => RenderChats();
         clearSearch.Click += (_, _) => { search.Clear(); search.Focus(); };
         filter.SelectedIndexChanged += (_, _) => RenderChats();
         list.CellClick += (_, e) => { if (e.RowIndex >= 0 && e.ColumnIndex == 0) ToggleRow(e.RowIndex); };
+        list.CellDoubleClick += (_, e) => { if (e.RowIndex >= 0 && e.ColumnIndex > 0) ShowConversation(); };
+        viewConversation.Click += (_, _) => ShowConversation();
         list.CurrentCellChanged += (_, _) => { if (!rendering) RenderDetails(); };
         list.CellPainting += PaintStatus;
         list.KeyDown += (_, e) =>
@@ -152,6 +156,7 @@ internal sealed class MainForm : Form
         tip.SetToolTip(clearSearch, "清除搜索");
         tip.SetToolTip(repair, "检查已删除会话留下的本地界面引用；先预览，再确认修复。");
         tip.SetToolTip(expandDetails, "在独立窗口查看完整标题、路径和处理原因");
+        tip.SetToolTip(viewConversation, "只读查看这条聊天的对话记录 · 也可双击列表行");
         tip.SetToolTip(checkUpdates, "启动时自动检查 GitHub 正式版；也可点击重新检查。不发送本地会话数据。");
         RenderSelection();
     }
@@ -364,9 +369,23 @@ internal sealed class MainForm : Form
         list.AccessibleName = "本地会话列表，点击会话查看详情，勾选或按空格选择清理";
         list.Columns.Add(new DataGridViewCheckBoxColumn { Name = "Selected", HeaderText = "", Width = 34, SortMode = DataGridViewColumnSortMode.NotSortable, Resizable = DataGridViewTriState.False, DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleCenter, Padding = Padding.Empty } });
         list.Columns.Add(new DataGridViewTextBoxColumn { Name = "Title", HeaderText = "会话标题", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, MinimumWidth = 130, SortMode = DataGridViewColumnSortMode.NotSortable });
+        list.Columns.Add(new DataGridViewTextBoxColumn { Name = "Size", HeaderText = "消息 · 大小", Width = 104, SortMode = DataGridViewColumnSortMode.NotSortable, DefaultCellStyle = new DataGridViewCellStyle { Font = new Font("Microsoft YaHei UI", 8f), ForeColor = DesktopTheme.Muted, Alignment = DataGridViewContentAlignment.MiddleRight } });
         list.Columns.Add(new DataGridViewTextBoxColumn { Name = "Updated", HeaderText = "最近更新", Width = 120, SortMode = DataGridViewColumnSortMode.NotSortable, DefaultCellStyle = new DataGridViewCellStyle { Font = new Font("Microsoft YaHei UI", 8f), ForeColor = DesktopTheme.Muted } });
         list.Columns.Add(new DataGridViewTextBoxColumn { Name = "Status", HeaderText = "处理方式", Width = 108, SortMode = DataGridViewColumnSortMode.NotSortable });
     }
+
+    private const int StatusColumn = 4;
+
+    internal static string FormatBytes(long bytes)
+    {
+        string[] units = ["B", "KB", "MB", "GB", "TB"];
+        double value = bytes;
+        var unit = 0;
+        while (value >= 1024 && unit < units.Length - 1) { value /= 1024; unit++; }
+        return unit == 0 ? $"{bytes} B" : $"{value:0.#} {units[unit]}";
+    }
+
+    private static string SizeText(ChatInfo chat) => $"{(chat.Messages is { } m ? m.ToString("N0") : "—")} · {FormatBytes(chat.RolloutBytes)}";
 
     private Control BuildSidebar()
     {
@@ -378,8 +397,9 @@ internal sealed class MainForm : Form
         detailLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         detailLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
         detailLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        var detailHeading = CreateLayout(3, 1);
+        var detailHeading = CreateLayout(4, 1);
         detailHeading.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        detailHeading.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         detailHeading.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         detailHeading.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         detailHeading.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -393,9 +413,14 @@ internal sealed class MainForm : Form
         expandDetails.Padding = copyDetails.Padding;
         expandDetails.Margin = new Padding(0, 0, 6, 0);
         expandDetails.AccessibleName = "展开会话完整详情";
+        viewConversation.Anchor = AnchorStyles.Right;
+        viewConversation.Font = copyDetails.Font;
+        viewConversation.Padding = copyDetails.Padding;
+        viewConversation.Margin = new Padding(0, 0, 6, 0);
         detailHeading.Controls.Add(detailTitle, 0, 0);
-        detailHeading.Controls.Add(expandDetails, 1, 0);
-        detailHeading.Controls.Add(copyDetails, 2, 0);
+        detailHeading.Controls.Add(viewConversation, 1, 0);
+        detailHeading.Controls.Add(expandDetails, 2, 0);
+        detailHeading.Controls.Add(copyDetails, 3, 0);
         detailLayout.Controls.Add(detailHeading, 0, 0);
         detailStatus.Dock = DockStyle.Fill;
         detailStatus.TextAlign = ContentAlignment.MiddleLeft;
@@ -466,12 +491,14 @@ internal sealed class MainForm : Form
         var q = search.Text.Trim();
         return (state?.Chats ?? []).Where(c =>
             (q.Length == 0 || c.Title.Contains(q, StringComparison.CurrentCultureIgnoreCase) || c.Id.Contains(q, StringComparison.OrdinalIgnoreCase)) &&
-            (filter.SelectedIndex switch { 1 => Selectable(c), 2 => c.CanRemoveRecord, 3 => !Selectable(c), 4 => c.Archived, _ => true }));
+            (filter.SelectedIndex switch { 1 => Selectable(c), 2 => c.CanRemoveRecord, 3 => !Selectable(c) && !c.InUse, 4 => c.InUse, 5 => c.Archived, _ => true }));
     }
 
-    private static string StatusText(ChatInfo chat) => chat.CanRemoveRecord ? "仅清理记录" : !chat.CanDelete ? "受保护" : chat.RolloutMissing ? "文件已缺失" : chat.Archived ? "已归档" : "本地会话";
+    private static string StatusText(ChatInfo chat) => chat.InUse ? "使用中" : chat.CanRemoveRecord ? "仅清理记录" : !chat.CanDelete ? "受保护" : chat.RolloutMissing ? "文件已缺失" : chat.Archived ? "已归档" : "本地会话";
 
-    private static (Color Ink, Color Fill) StatusColors(ChatInfo chat) => chat.CanRemoveRecord || chat.RolloutMissing
+    private static (Color Ink, Color Fill) StatusColors(ChatInfo chat) => chat.InUse
+        ? (Color.FromArgb(37, 99, 235), Color.FromArgb(232, 240, 254))
+        : chat.CanRemoveRecord || chat.RolloutMissing
         ? (Color.FromArgb(152, 94, 19), Color.FromArgb(255, 246, 224))
         : !chat.CanDelete ? (Color.FromArgb(140, 66, 66), Color.FromArgb(253, 237, 237))
         : chat.Archived ? (Color.FromArgb(112, 84, 158), Color.FromArgb(244, 239, 252))
@@ -479,7 +506,7 @@ internal sealed class MainForm : Form
 
     private void PaintStatus(object? sender, DataGridViewCellPaintingEventArgs e)
     {
-        if (e.RowIndex < 0 || e.ColumnIndex != 3 || list.Rows[e.RowIndex].Tag is not ChatInfo chat || e.Graphics is null) return;
+        if (e.RowIndex < 0 || e.ColumnIndex != StatusColumn || list.Rows[e.RowIndex].Tag is not ChatInfo chat || e.Graphics is null) return;
         e.PaintBackground(e.ClipBounds, true);
         var (ink, fill) = StatusColors(chat);
         var scale = DeviceDpi / 96f;
@@ -497,14 +524,15 @@ internal sealed class MainForm : Form
 
     private void ApplyGridMetrics()
     {
-        if (IsDisposed || list.Columns.Count < 4) return;
+        if (IsDisposed || list.Columns.Count <= StatusColumn) return;
         int ScaleSize(int value) => (int)Math.Round(value * DeviceDpi / 96f);
         list.RowTemplate.Height = ScaleSize(43);
         list.ColumnHeadersHeight = ScaleSize(36);
         list.Columns[0].Width = ScaleSize(34);
         list.Columns[1].MinimumWidth = ScaleSize(130);
-        list.Columns[2].Width = ScaleSize(142);
-        list.Columns[3].Width = ScaleSize(108);
+        list.Columns[2].Width = ScaleSize(104);
+        list.Columns[3].Width = ScaleSize(128);
+        list.Columns[StatusColumn].Width = ScaleSize(108);
         foreach (DataGridViewRow row in list.Rows) row.Height = list.RowTemplate.Height;
         list.Invalidate();
     }
@@ -538,7 +566,7 @@ internal sealed class MainForm : Form
             list.Rows.Clear();
             foreach (var chat in VisibleChats())
             {
-                var index = list.Rows.Add(selected.Contains(chat.Id), chat.Title, chat.UpdatedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "—", StatusText(chat));
+                var index = list.Rows.Add(selected.Contains(chat.Id), chat.Title, SizeText(chat), chat.UpdatedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "—", StatusText(chat));
                 var row = list.Rows[index];
                 row.Tag = chat;
                 foreach (DataGridViewCell cell in row.Cells) cell.ToolTipText = $"{chat.Title}\n{chat.Id}\n{StatusText(chat)}" + (chat.BlockedReason is null ? "" : "\n" + chat.BlockedReason);
@@ -552,7 +580,8 @@ internal sealed class MainForm : Form
         emptyState.Text = state is null ? "暂时无法读取会话\n点击「刷新」重新检查" : state.Chats.Count == 0 ? "还没有本地会话\n识别到的聊天会显示在这里" : "没有匹配的会话\n试试其他关键词或筛选条件";
         emptyState.Visible = list.Rows.Count == 0;
         list.Visible = list.Rows.Count > 0;
-        listCount.Text = state is null ? "尚未加载" : $"{state.Chats.Count} 条记录 · 显示 {list.Rows.Count} 条";
+        var inUse = state?.Chats.Count(c => c.InUse) ?? 0;
+        listCount.Text = state is null ? "尚未加载" : $"{state.Chats.Count} 条记录 · 显示 {list.Rows.Count} 条" + (inUse > 0 ? $" · {inUse} 条使用中" : "");
         RenderDetails();
         RenderSelection();
     }
@@ -566,25 +595,38 @@ internal sealed class MainForm : Form
             detailStatus.ForeColor = DesktopTheme.Muted;
             details.Text = "点击列表中的会话，在这里查看完整标题、路径和处理说明。\r\n\r\n勾选方框才会加入清理范围。";
             details.SelectionStart = details.SelectionLength = 0;
-            copyDetails.Enabled = expandDetails.Enabled = false;
+            copyDetails.Enabled = expandDetails.Enabled = viewConversation.Enabled = false;
             return;
         }
         focusedChatId = chat.Id;
         detailStatus.Text = StatusText(chat);
         detailStatus.ForeColor = StatusColors(chat).Ink;
-        var explanation = chat.CanRemoveRecord
-            ? "可清理这条会话的本地数据库记录与已识别关联。原会话文件会保留，不会访问或删除该路径。"
+        var explanation = chat.InUse ? "这条聊天正在 Codex 中使用，暂不能清理；可以查看对话。"
+            : chat.CanRemoveRecord ? "可清理这条会话的本地数据库记录与已识别关联。原会话文件会保留，不会访问或删除该路径。"
             : !chat.CanDelete ? "当前无法清理这条会话，请先处理下面的原因。"
             : chat.RolloutMissing ? "会话文件已缺失，可清理残留的本地记录与关联。"
             : "将清理这条会话及已验证的本地关联；实际影响范围会在下一步列出。";
+        var extra = chat.RolloutFiles.Where(f => !string.Equals(f, chat.RelativePath, StringComparison.OrdinalIgnoreCase)).ToList();
         details.Text = $"{chat.Title}\r\n\r\n{explanation}"
             + (chat.BlockedReason is null ? "" : $"\r\n\r\n检查说明\r\n{chat.BlockedReason}")
             + $"\r\n\r\n会话 ID\r\n{chat.Id}\r\n\r\n会话路径\r\n{(string.IsNullOrWhiteSpace(chat.OriginalPath) ? chat.RelativePath ?? "未提供会话文件路径" : chat.OriginalPath)}"
+            + (extra.Count > 0 ? $"\r\n\r\n同一聊天的其他会话文件（分段或压缩副本，一并删除）\r\n{string.Join("\r\n", extra)}" : "")
+            + (chat.ForkChildren.Count > 0 ? $"\r\n\r\n被分叉引用\r\n{chat.ForkChildren.Count} 个分叉聊天以它为历史来源，需要一起删除：\r\n{string.Join("\r\n", chat.ForkChildren.Select(ChatLabel))}" : "")
+            + $"\r\n\r\n消息 · 会话文件大小\r\n{SizeText(chat)}"
             + $"\r\n\r\n最近更新\r\n{chat.UpdatedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "未知"}"
             + (chat.Archived ? "\r\n\r\n归档状态\r\n已归档" : "");
         details.SelectionStart = 0;
         details.SelectionLength = 0;
-        copyDetails.Enabled = expandDetails.Enabled = true;
+        copyDetails.Enabled = expandDetails.Enabled = viewConversation.Enabled = true;
+    }
+
+    private string ChatLabel(string id) => state?.Chats.FirstOrDefault(c => c.Id == id) is { } c ? $"{c.Title}（{id}）" : id;
+
+    private void ShowConversation()
+    {
+        if (busy || list.CurrentRow?.Tag is not ChatInfo chat) return;
+        using var dialog = new ConversationDialog(cleaner, chat);
+        dialog.ShowDialog(this);
     }
 
     private void RenderSelection()
@@ -602,6 +644,7 @@ internal sealed class MainForm : Form
         var notes = new List<string>();
         if (hidden > 0) notes.Add($"筛选外仍有 {hidden} 条已选");
         if (recordOnly > 0) notes.Add($"{recordOnly} 条仅清理本地记录，保留原文件");
+        if (codexRunning && selected.Count > 0) notes.Add("Codex 运行中：界面引用待退出后修复");
         if (notes.Count == 0) notes.Add("先预览，再确认 · 项目、设置和云端记录不受影响");
         selectionCount.Text = string.Join(" · ", notes);
         selectionCount.ForeColor = hidden > 0 || recordOnly > 0 ? Color.FromArgb(152, 94, 19) : DesktopTheme.Muted;
@@ -615,7 +658,8 @@ internal sealed class MainForm : Form
         refresh.Enabled = search.Enabled = filter.Enabled = list.Enabled = !busy;
         clearSearch.Enabled = !busy && search.TextLength > 0;
         clearSearch.Visible = search.TextLength > 0;
-        clearMemories.Enabled = clearShared.Enabled = !busy && !recoveryBlocked && caps?.ClearData == true;
+        // Clearing every chat's memories or shared history touches files Codex keeps writing.
+        clearMemories.Enabled = clearShared.Enabled = !busy && !recoveryBlocked && !codexRunning && caps?.ClearData == true;
         selectAll.Enabled = !busy && selectable.Count > 0;
         selectAll.Text = selectable.Count > 0 && selectable.All(c => selected.Contains(c.Id)) ? "取消结果选择" : "全选结果";
         clearSelection.Enabled = !busy && selected.Count > 0;
@@ -629,7 +673,11 @@ internal sealed class MainForm : Form
         activity = label;
         UseWaitCursor = true;
         RenderSelection();
-        try { await action(); }
+        try
+        {
+            if (refreshing is { } pending) await pending;
+            await action();
+        }
         catch (Exception e) when (e is CleanerException or IOException or UnauthorizedAccessException or Microsoft.Data.Sqlite.SqliteException)
         {
             if (!IsDisposed) MessageBox.Show(this, e.Message, "操作未完成", MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -666,6 +714,32 @@ internal sealed class MainForm : Form
         RenderChats();
     }
 
+    private const int InUseRefreshTicks = 3;
+    private int quietChecks;
+
+    // Background refresh: a failure keeps the current list instead of interrupting the user.
+    // It does not set busy, so typing and selection continue; Run waits for it before acting.
+    private Task RefreshQuietly()
+    {
+        if (busy || IsDisposed || OwnedForms.Length > 0 || refreshing is { IsCompleted: false }) return Task.CompletedTask;
+        return refreshing = Refresh();
+
+        async Task Refresh()
+        {
+            try
+            {
+                var snapshot = await Task.Run(cleaner.Snapshot);
+                if (IsDisposed || busy) return;
+                state = snapshot;
+                selected.IntersectWith(snapshot.Chats.Where(Selectable).Select(c => c.Id));
+                RenderChats();
+            }
+            catch (Exception e) when (e is CleanerException or IOException or UnauthorizedAccessException or Microsoft.Data.Sqlite.SqliteException) { }
+        }
+    }
+
+    private Task? refreshing;
+
     private async Task RefreshProcessState()
     {
         if (busy || checkingProcess || IsDisposed) return;
@@ -673,7 +747,10 @@ internal sealed class MainForm : Form
         try
         {
             var process = await Task.Run(cleaner.CheckProcesses);
-            if (!IsDisposed && !busy) SetProcess(process);
+            if (IsDisposed || busy) return;
+            var changed = SetProcess(process);
+            // Which chats Codex holds changes as it opens and closes them; keep the list current.
+            if (changed || (codexRunning && ++quietChecks % InUseRefreshTicks == 0)) await RefreshQuietly();
         }
         catch (Exception e)
         {
@@ -688,14 +765,22 @@ internal sealed class MainForm : Form
         finally { checkingProcess = false; }
     }
 
-    private void SetProcess(ProcessState process)
+    // Returns whether Codex started or stopped since the last check.
+    private bool SetProcess(ProcessState process)
     {
         var ready = !process.Running && process.Processes.Count == 0;
-        processDot.ForeColor = ready ? Color.FromArgb(42, 133, 87) : Color.FromArgb(185, 119, 27);
+        var changed = codexRunning == ready;
+        codexRunning = !ready;
+        processDot.ForeColor = ready ? Color.FromArgb(42, 133, 87) : Color.FromArgb(37, 99, 235);
         processTitle.Text = ready ? "准备就绪" : "Codex 正在运行";
-        processDetail.Text = ready ? "核对预览后即可清理" : "预览可用 · 清理前退出 Codex";
+        processDetail.Text = ready ? "核对预览后即可清理" : "可删除未在使用的聊天 · 全局清理需先退出";
         tip.SetToolTip(processTitle, ready ? "未检测到 Codex 相关进程。" : string.Join(Environment.NewLine, process.Processes));
-        tip.SetToolTip(processDetail, $"{processDetail.Text}。程序会自动复查运行状态。\n数据目录：{cleaner.DataRoot}");
+        tip.SetToolTip(processDetail, (ready ? processDetail.Text : "Codex 运行时，标为「使用中」的聊天不能勾选，其余聊天可以直接清理；桌面界面里的置顶、草稿等引用会在退出 Codex 后用「检查失效引用」清除。")
+            + $"\n程序会自动复查运行状态。\n数据目录：{cleaner.DataRoot}");
+        if (!changed) return false;
+        if (codexRunning) clearMemories.Checked = clearShared.Checked = false;
+        RenderSelection();
+        return true;
     }
 
     private void ShowDiagnostics() => ShowTextDialog("本地检查详情", string.Join("\r\n\r\n", diagnostics.Select((d, i) => $"{i + 1}. {d}")));
@@ -726,7 +811,8 @@ internal sealed class MainForm : Form
         var result = await Task.Run(() => cleaner.Execute(plan.Id));
         selected.Clear();
         clearMemories.Checked = clearShared.Checked = false;
-        await Done(result, plan.Chats.Any(c => c.CanRemoveRecord) ? "所选本地记录已清理。预览中标明保留的原会话文件未被删除。" : "所选内容已清理完成。");
+        await Done(result, (plan.Chats.Any(c => c.CanRemoveRecord) ? "所选本地记录已清理。预览中标明保留的原会话文件未被删除。" : "所选内容已清理完成。")
+            + (plan.Live ? "\n\nCodex 运行期间没有修改桌面界面状态。退出 Codex 后点击「检查失效引用」，可清除置顶、草稿等残留引用。" : ""));
     });
 
     private Task PreviewRepair() => Run("正在检查失效引用…", async () =>

@@ -7,7 +7,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <Version>3.2.0</Version>
+    <Version>3.3.0</Version>
     <AssemblyTitle>Codex 本地清理台</AssemblyTitle>
     <Product>CodexCleaner</Product>
     <Company>XiaoBai620</Company>
@@ -29,6 +29,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.13" />
     <InternalsVisibleTo Include="CodexCleaner.Tests" />
+    <PackageReference Include="ZstdSharp.Port" Version="0.8.8" />
   </ItemGroup>
 
 </Project>

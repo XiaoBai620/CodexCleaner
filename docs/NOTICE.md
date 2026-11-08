@@ -6,5 +6,6 @@
   - Microsoft.Data.Sqlite（MIT，© .NET Foundation and Contributors）
   - SQLitePCLRaw（Apache License 2.0，© Eric Sink / SourceGear）
   - SQLite（公有领域）
-- 程序图标 `src/CodexCleaner/app.ico` 由本项目用代码绘制，未使用第三方素材。`docs/screenshot.png` 使用虚构的测试数据生成，不含真实聊天。
+  - ZstdSharp.Port（MIT，© Oleg Stepanischev），用于读取 Codex 压缩的 `.jsonl.zst` 会话文件首行
+- 程序图标 `src/CodexCleaner/app.ico` 由 `scripts/make_icon.py` 用基本图形绘制（黑底白色对话框加擦除笔画），未使用 OpenAI 标志或其他第三方素材。查看对话窗口的界面代码移植自同作者的 DevinCleaner（MIT）。`docs/screenshot.png` 使用虚构的测试数据生成，不含真实聊天。
 - `tests/CodexCleaner.Tests/fixture-schema.json` 是 2026-10-31 观察到的 SQLite 结构兼容性元数据：只有表、索引、触发器的定义，没有用户数据行、聊天正文或认证值。它用于在临时目录重建匹配的测试结构；不表示这些上游结构由本项目原创，也不为上游产品授予许可证。其他测试内容均为虚构数据。

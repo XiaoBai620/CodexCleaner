@@ -50,20 +50,24 @@ public sealed partial class Cleaner
         return actions;
     }
 
-    private (Dictionary<string, Fingerprint> Fingerprints, List<string> AutomationFiles) PlanBaseline()
+    // While Codex runs, shared databases, desktop state and indexes change constantly; live plans
+    // track only files Codex cannot touch for a locked chat, and re-check each chat's row stamp.
+    private IEnumerable<string> Tracked(List<string> automationFiles, bool live) => live ? automationFiles
+        : Catalog.GlobalFiles.Concat(IndexFiles).Concat(automationFiles).Concat(Catalog.Schemas.Keys.SelectMany(rel => Catalog.SqliteSuffixes.Select(s => rel + s)));
+
+    private (Dictionary<string, Fingerprint> Fingerprints, List<string> AutomationFiles) PlanBaseline(bool live = false)
     {
         var automationFiles = AutomationFiles();
-        var tracked = Catalog.GlobalFiles.Concat([Catalog.History, Catalog.SessionIndex]).Concat(automationFiles)
-            .Concat(Catalog.Schemas.Keys.SelectMany(rel => Catalog.SqliteSuffixes.Select(s => rel + s)));
-        return (Fingerprints(tracked), automationFiles);
+        return (Fingerprints(Tracked(automationFiles, live)), automationFiles);
     }
 
-    private List<FileWork> JsonEdits(IReadOnlyList<string> ids, Selection selection)
+    // Desktop state is rewritten by the running app; live plans leave it to a later repair.
+    private List<FileWork> JsonEdits(IReadOnlyList<string> ids, Selection selection, bool live = false)
     {
         var edits = new List<FileWork>();
         var selected = ids.ToHashSet();
         var desktop = new DesktopState(DataRoot);
-        foreach (var rel in Catalog.GlobalFiles)
+        foreach (var rel in live ? [] : Catalog.GlobalFiles)
         {
             if (Stat(rel) is not { } entry) continue;
             if (entry is not FileInfo) throw new CleanerException($"无法安全解析桌面状态：{rel}");
@@ -73,32 +77,65 @@ public sealed partial class Cleaner
                 edits.Add(new FileWork(rel, false, DesktopState.Serialize(root), DesktopState.Hash(bytes), references));
         }
         if (ids.Count > 0)
-        {
-            foreach (var (rel, key) in new[] { (Catalog.SessionIndex, "id"), (Catalog.History, "session_id") })
+            foreach (var rel in IndexFiles)
             {
                 if (Stat(rel) is not { } entry) continue;
                 if (entry is not FileInfo file || file.Length > Catalog.MaxJsonBytes) throw new CleanerException($"索引太大或类型未知：{rel}");
                 var bytes = File.ReadAllBytes(file.FullName);
-                var text = Encoding.UTF8.GetString(bytes);
-                var kept = new StringBuilder();
-                var changed = false;
-                foreach (var line in SplitKeepingNewlines(text))
-                {
-                    if (line.Trim().Length > 0)
-                    {
-                        JsonNode? value;
-                        try { value = JsonNode.Parse(line.TrimStart('\uFEFF')); }
-                        catch (JsonException) { throw new CleanerException($"索引包含无法解析的 JSON 行：{rel}"); }
-                        if (Json.Str(Json.Get(value, key)) is { } id && selected.Contains(id)) { changed = true; continue; }
-                    }
-                    kept.Append(line);
-                }
-                if (changed) edits.Add(new FileWork(rel, false, Encoding.UTF8.GetBytes(kept.ToString()), DesktopState.Hash(bytes)));
+                if (WithoutIds(rel, bytes, selected) is { } kept) edits.Add(new FileWork(rel, false, kept, DesktopState.Hash(bytes)));
             }
-        }
         Hooks.AfterJsonEdits?.Invoke();
         return edits;
     }
+
+    private static readonly string[] IndexFiles = [Catalog.SessionIndex, Catalog.History];
+
+    // Returns the index without lines naming a selected chat, or null when nothing matches.
+    private static byte[]? WithoutIds(string rel, byte[] bytes, IReadOnlySet<string> selected)
+    {
+        var key = rel == Catalog.SessionIndex ? "id" : "session_id";
+        var kept = new StringBuilder();
+        var changed = false;
+        foreach (var line in SplitKeepingNewlines(Encoding.UTF8.GetString(bytes)))
+        {
+            if (line.Trim().Length > 0)
+            {
+                JsonNode? value;
+                try { value = JsonNode.Parse(line.TrimStart('\uFEFF')); }
+                catch (JsonException) { throw new CleanerException($"索引包含无法解析的 JSON 行：{rel}"); }
+                if (Json.Str(Json.Get(value, key)) is { } id && selected.Contains(id)) { changed = true; continue; }
+            }
+            kept.Append(line);
+        }
+        return changed ? Encoding.UTF8.GetBytes(kept.ToString()) : null;
+    }
+
+    // Verified rollouts of a chat: its recorded path plus every file whose session_meta names it,
+    // including continuation segments and cold .jsonl.zst copies. Record-only chats keep files.
+    private static IEnumerable<string> RolloutFilesOf(ChatInfo chat, RolloutIndex index) =>
+        chat.CanRemoveRecord ? [] : new[] { chat.RelativePath }.OfType<string>().Concat(index.FilesOf(chat.Id)).Distinct(StringComparer.OrdinalIgnoreCase);
+
+    // Codex refuses to delete a thread whose history another rollout forks from (delete_thread.rs).
+    private static void AssertNoExternalForks(IReadOnlyList<ChatInfo> chats, RolloutIndex index, IReadOnlyList<ChatInfo> known)
+    {
+        var selected = chats.Select(c => c.Id).ToHashSet(StringComparer.Ordinal);
+        foreach (var chat in chats)
+            if (index.ExternalChildren(chat.Id, selected) is { Count: > 0 } children)
+            {
+                var names = children.Select(id => known.FirstOrDefault(c => c.Id == id)?.Title is { } t ? $"{t}（{id}）" : id);
+                throw new CleanerException($"聊天「{chat.Title}」被 {children.Count} 个分叉聊天引用为历史来源：{string.Join('、', names)}。单独删除会让它们无法读取历史；请一并选择这些分叉聊天。");
+            }
+    }
+
+    private bool CodexRunning()
+    {
+        // An unverifiable state plans strictly; execution then re-checks and refuses.
+        try { return processCheck() is { } state && (state.Running || state.Processes.Count > 0); }
+        catch (Exception e) when (e is not OutOfMemoryException) { return false; }
+    }
+
+    private static Dictionary<string, long?> UpdatedStamps(Microsoft.Data.Sqlite.SqliteConnection db, IEnumerable<string> ids) =>
+        ids.ToDictionary(id => id, id => Db.Scalar(db, "SELECT coalesce(updated_at_ms, updated_at * 1000) FROM threads WHERE id=$p0", [id]) as long?);
 
     private static IEnumerable<string> SplitKeepingNewlines(string text)
     {
@@ -110,17 +147,7 @@ public sealed partial class Cleaner
 
     private void CheckRollout(string rel, string id)
     {
-        var buffer = new byte[1024 * 1024];
-        int read;
-        using (var stream = File.Open(Data(rel), FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete)) read = stream.ReadAtLeast(buffer, buffer.Length, throwOnEndOfStream: false);
-        var text = Encoding.UTF8.GetString(buffer, 0, read);
-        var end = text.IndexOf('\n');
-        if (end < 0 && read == buffer.Length) throw new CleanerException("会话元数据行太长，无法验证。");
-        JsonNode? first;
-        try { first = JsonNode.Parse((end < 0 ? text : text[..end]).TrimStart('\uFEFF').Trim()); }
-        catch (JsonException) { first = null; }
-        if (Json.Str(Json.Get(first, "type")) != "session_meta" || Json.Str(Json.Get(Json.Get(first, "payload"), "id")) != id)
-            throw new CleanerException($"会话文件 ID 与聊天索引不一致：{rel}");
+        if (ReadSessionMeta(rel)?.Id != id) throw new CleanerException($"会话文件 ID 与聊天索引不一致：{rel}");
         Hooks.AfterCheckRollout?.Invoke(rel);
     }
 
@@ -220,9 +247,12 @@ public sealed partial class Cleaner
         if (ids.Count > (repair ? 10000 : 500)) throw new CleanerException("选择的条目过多，请分批清理。");
         var selection = request with { ChatIds = ids };
         if (ids.Count == 0 && !selection.ClearMemories && !selection.ClearSharedHistory) throw new CleanerException("没有选择要清理的内容。");
+        var live = !repair && CodexRunning();
+        if (live && (selection.ClearMemories || selection.ClearSharedHistory))
+            throw new CleanerException("Codex 运行时只能删除未在使用的聊天；清空全部记忆或共享历史需要先退出 Codex。");
         // Take the baseline before reading paths and row counts. Otherwise a write
         // during preview construction can silently become the accepted baseline.
-        var baseline = initialBaseline ?? PlanBaseline();
+        var baseline = initialBaseline ?? PlanBaseline(live);
         var snapshot = initialSnapshot ?? TakeSnapshot();
         foreach (var (rel, info) in snapshot.Databases)
             if (info is { Present: true, Supported: false }) throw new CleanerException($"无法安全清理：{rel} 的结构未验证。");
@@ -235,14 +265,16 @@ public sealed partial class Cleaner
             return chat.CanDelete || (selection.AllowRecordOnly && chat.CanRemoveRecord)
                 ? chat : throw new CleanerException(chat.BlockedReason!);
         }).ToList();
-        var rolloutPaths = selected.Select(c => c.RelativePath).OfType<string>().ToList();
+        AssertNoExternalForks(selected, snapshot.Rollouts, snapshot.Chats);
+        var rolloutPaths = selected.SelectMany(c => RolloutFilesOf(c, snapshot.Rollouts)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         var rolloutFingerprints = Fingerprints(rolloutPaths);
         var files = new Dictionary<string, FileWork>();
         foreach (var chat in selected)
-            if (chat.RelativePath is { } rel && Stat(rel) is not null) { CheckRollout(rel, chat.Id); files[rel] = new FileWork(rel, true); }
+            foreach (var rel in RolloutFilesOf(chat, snapshot.Rollouts))
+                if (Stat(rel) is not null) { CheckRollout(rel, chat.Id); files[rel] = new FileWork(rel, true); }
         var memoryPaths = selection.ClearMemories ? MemoryFiles() : [];
         foreach (var rel in memoryPaths) files[rel] = new FileWork(rel, true);
-        foreach (var edit in JsonEdits(ids, selection)) files[edit.Path] = edit;
+        foreach (var edit in JsonEdits(ids, selection, live)) files[edit.Path] = edit;
         var databases = new List<DatabaseWork>();
         foreach (var (rel, info) in snapshot.Databases)
         {
@@ -260,13 +292,25 @@ public sealed partial class Cleaner
         var automationFiles = AutomationFiles();
         if (!automationFiles.SequenceEqual(baseline.AutomationFiles)) throw new CleanerException("自动化文件列表在生成预览时改变，请重新预览。");
         // Even preserved DBs can gain new messages or automations between preview and execution.
-        var tracked = files.Keys.Concat(rolloutPaths).Concat(Catalog.GlobalFiles).Concat([Catalog.History, Catalog.SessionIndex]).Concat(automationFiles)
-            .Concat(Catalog.Schemas.Keys.SelectMany(rel => Catalog.SqliteSuffixes.Select(s => rel + s)));
+        // Live index rewrites are recomputed under the writer locks, so only their removals are tracked.
+        var tracked = files.Values.Where(f => f.Remove || !live).Select(f => f.Path).Concat(rolloutPaths).Concat(Tracked(automationFiles, live));
         var fingerprints = Fingerprints(tracked);
         foreach (var (rel, before) in baseline.Fingerprints.Concat(rolloutFingerprints))
             if (fingerprints[rel] != before) throw new CleanerException($"数据在生成预览时发生变化，请重新预览：{rel}");
         foreach (var file in files.Values)
-            if (file.SourceHash is not null && file.SourceHash != fingerprints[file.Path].Sha256) throw new CleanerException($"数据在生成预览时发生变化，请重新预览：{file.Path}");
+            if (!live && file.SourceHash is not null && file.SourceHash != fingerprints[file.Path].Sha256) throw new CleanerException($"数据在生成预览时发生变化，请重新预览：{file.Path}");
+        Dictionary<string, long?> updated = [];
+        if (live)
+        {
+            using var state = Db.Open(Data("state_5.sqlite"), writable: false);
+            updated = UpdatedStamps(state, ids);
+            // A chat that Codex loaded or wrote while this preview was built is no longer idle.
+            var reopened = ThreadLocks.Held(ThreadLockRoot(), ids);
+            if (reopened.Count > 0) throw new CleanerException($"聊天 {string.Join('、', reopened)} 刚刚在 Codex 中被打开，请关闭它后重新预览。");
+            foreach (var chat in selected)
+                if (chat.UpdatedAt?.ToUnixTimeMilliseconds() != updated[chat.Id])
+                    throw new CleanerException($"聊天「{chat.Title}」在生成预览时有新的变化，请重新预览。");
+        }
         var warnings = repair
             ? new List<string> { "仅清除已不在本机聊天索引中的明确本机引用，保留现有聊天、项目和远端状态。" }
             : new List<string>
@@ -279,16 +323,18 @@ public sealed partial class Cleaner
         var recordOnly = selected.Where(c => c.CanRemoveRecord).ToList();
         if (recordOnly.Count > 0)
             warnings.Insert(0, $"其中 {recordOnly.Count} 条聊天仅清理本地数据库记录及已识别的关联引用；原会话文件路径未验证，不会据此查找或删除文件。若原文件以后被 Codex 再次导入，这些聊天可能重新出现。");
+        if (live)
+            warnings.Insert(0, "Codex 正在运行：执行时会先占用所选聊天的写入锁，阻止 Codex 打开它们；数据库逐个在事务中删除，失败的库会回滚。桌面界面状态里的置顶、草稿等引用暂不修改，退出 Codex 后点击「检查失效引用」即可清除。");
         var planId = Guid.NewGuid().ToString();
         var publicPlan = new Plan(planId, repair, DateTimeOffset.Now + Catalog.PlanLifetime, selection, selected,
             files.Values.Sum(f => f.References),
             files.Values.Select(f => new PlanFile(f.Path, f.Remove, Catalog.Purpose(f.Path))).ToList(),
             databases.Select(d => new PlanDatabase(d.Path, d.Actions.Sum(a => a.Count), d.Actions.Select(a => new PlanTable(a.Table, a.Count, a.Kind == ActionKind.ClearReference)).ToList())).ToList(),
-            warnings);
+            warnings) { Live = live };
         lock (gate)
         {
             foreach (var key in plans.Where(p => p.Value.Expires < DateTimeOffset.Now).Select(p => p.Key).ToList()) plans.Remove(key);
-            plans[planId] = new PlanState(publicPlan, [.. files.Values], databases, fingerprints, automationFiles, memoryPaths, publicPlan.ExpiresAt);
+            plans[planId] = new PlanState(publicPlan, [.. files.Values], databases, fingerprints, automationFiles, memoryPaths, publicPlan.ExpiresAt) { Updated = updated };
         }
         return publicPlan;
     }

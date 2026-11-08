@@ -8,9 +8,10 @@ internal static class Db
 {
     private const int CantOpen = 14;
 
-    public static SqliteConnection Open(string file, bool writable)
+    // Writes while Codex runs share the database with its own writers; they wait longer for the lock.
+    public static SqliteConnection Open(string file, bool writable, int busySeconds = 1)
     {
-        try { return Connect(file, writable); }
+        try { return Connect(file, writable, busySeconds); }
         catch (SqliteException e) when (!writable && e.SqliteErrorCode == CantOpen)
         {
             // Some WAL databases cannot be opened read-only without creating sidecars.
@@ -21,7 +22,7 @@ internal static class Db
         }
     }
 
-    private static SqliteConnection Connect(string file, bool writable)
+    private static SqliteConnection Connect(string file, bool writable, int busySeconds = 1)
     {
         var connection = new SqliteConnection(new SqliteConnectionStringBuilder
         {
@@ -29,12 +30,12 @@ internal static class Db
             Mode = writable ? SqliteOpenMode.ReadWrite : SqliteOpenMode.ReadOnly,
             Pooling = false,
             ForeignKeys = true,
-            DefaultTimeout = 1,
+            DefaultTimeout = busySeconds,
         }.ToString());
         try
         {
             connection.Open();
-            Exec(connection, "PRAGMA busy_timeout=1000");
+            Exec(connection, $"PRAGMA busy_timeout={busySeconds * 1000}");
             if (!writable) Exec(connection, "PRAGMA query_only=ON");
             return connection;
         }

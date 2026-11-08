@@ -103,7 +103,8 @@ public sealed partial class Cleaner
         if (state.Running || state.Processes.Count > 0) throw new CleanerException("请先完全退出 Codex 桌面程序、命令行与相关后台进程，再重试。");
     }
 
-    private T Exclusive<T>(Func<T> operation)
+    // Live operations run beside Codex and rely on its per-thread writer locks instead of its absence.
+    private T Exclusive<T>(Func<T> operation, bool live = false)
     {
         lock (gate)
         {
@@ -115,13 +116,13 @@ public sealed partial class Cleaner
         string? lockFile = null;
         try
         {
-            ProcessGuard();
+            if (!live) ProcessGuard();
             Directory.CreateDirectory(Trash(missing: true));
             lockFile = Trash(".mutation.lock", true);
             lockHandle = TryCreate(lockFile) ?? ReclaimStaleLock(lockFile);
             JsonSerializer.Serialize(lockHandle, new LockInfo(Environment.ProcessId, DateTimeOffset.UtcNow, DataRoot), ManifestJson.Default.LockInfo);
             lockHandle.Flush();
-            ProcessGuard();
+            if (!live) ProcessGuard();
             return operation();
         }
         finally
@@ -246,15 +247,28 @@ public sealed partial class Cleaner
         catch (Exception e) when (e is CleanerException or IOException or Microsoft.Data.Sqlite.SqliteException) { automationError = e.Message; warnings.Add($"自动化关联检查失败：{e.Message}"); }
         var chats = new List<ChatInfo>();
         var statePresent = databases["state_5.sqlite"].Present;
+        var rollouts = new RolloutIndex();
+        string? scanError = null;
+        try { rollouts = ScanRollouts(); }
+        catch (Exception e) when (e is CleanerException or IOException or UnauthorizedAccessException)
+        {
+            scanError = e.Message;
+            warnings.Add($"会话文件目录检查失败，无法确认分叉引用：{e.Message}");
+        }
         if (databases["state_5.sqlite"].Supported && statePresent)
         {
             using var db = Db.Open(Data("state_5.sqlite"), writable: false);
-            foreach (var r in Db.Rows(db, "SELECT id,title,rollout_path,updated_at,updated_at_ms,archived FROM threads ORDER BY updated_at DESC"))
+            var rows = Db.Rows(db, "SELECT id,title,rollout_path,updated_at,updated_at_ms,archived FROM threads ORDER BY updated_at DESC");
+            var inUse = ThreadLocks.Held(ThreadLockRoot(), rows.Select(r => (string)r[0]!).Where(Ids.Valid));
+            var messages = MessageCounts(databases);
+            foreach (var r in rows)
             {
                 var id = (string)r[0]!;
                 var reason = unsupported.Count > 0 ? "数据库检查未通过，请查看上方具体原因。"
-                    : automationError is not null ? "自动化定义无法解析，无法安全维护其目标。" : null;
+                    : automationError is not null ? "自动化定义无法解析，无法安全维护其目标。"
+                    : scanError is not null ? "会话文件目录检查失败，无法确认分叉引用；请查看检查详情。" : null;
                 if (targets.TryGetValue(id, out var labels)) reason = $"此聊天是自动化 {string.Join('、', labels)} 的目标，请先在 Codex 中处理该任务。";
+                if (inUse.Contains(id)) reason = "此聊天正在 Codex 中使用（已加载或有子任务在运行），关闭它或退出 Codex 后才能清理。";
                 string? relativePath = null;
                 var missing = false;
                 var canRemoveRecord = false;
@@ -300,18 +314,35 @@ public sealed partial class Cleaner
                     canRemoveRecord = true;
                 }
                 var updated = r[4] is long ms ? DateTimeOffset.FromUnixTimeMilliseconds(ms) : r[3] is long s ? DateTimeOffset.FromUnixTimeSeconds(s) : (DateTimeOffset?)null;
+                var files = rollouts.FilesOf(id);
                 chats.Add(new ChatInfo(id, r[1] as string is { Length: > 0 } title ? title : "未命名聊天", updated, r[5] is long archived && archived != 0, relativePath, missing, reason)
                 {
                     OriginalPath = originalPath,
                     CanRemoveRecord = canRemoveRecord,
+                    InUse = inUse.Contains(id),
+                    Messages = messages?.GetValueOrDefault(id),
+                    RolloutFiles = files,
+                    RolloutBytes = rollouts.BytesOf(id),
+                    ForkChildren = rollouts.ExternalChildren(id, new HashSet<string>([id])),
                 });
             }
         }
         if (!statePresent) warnings.Add("未发现受支持的聊天索引 state_5.sqlite；不会猜测或删除孤立会话文件。");
         var safe = unsupported.Count == 0;
         return new Snapshot(chats, databases, warnings,
-            new Capabilities(statePresent && safe && automationError is null, statePresent && safe, safe), RecoveryIssues())
-        { AutomationTargets = targets };
+            new Capabilities(statePresent && safe && automationError is null && scanError is null, statePresent && safe, safe), RecoveryIssues())
+        { AutomationTargets = targets, Rollouts = rollouts };
+    }
+
+    internal string ThreadLockRoot() => Data(ThreadLocks.Directory, missing: true);
+
+    // User and agent messages per chat from the history projection; null when it cannot be read.
+    private Dictionary<string, long>? MessageCounts(Dictionary<string, DatabaseStatus> databases)
+    {
+        if (databases["thread_history_1.sqlite"] is not { Present: true, Supported: true }) return null;
+        using var db = Db.Open(Data("thread_history_1.sqlite"), writable: false);
+        return Db.Rows(db, "SELECT thread_id, count(*) FROM thread_items WHERE item_type IN ('userMessage','agentMessage') GROUP BY thread_id")
+            .ToDictionary(r => (string)r[0]!, r => (long)r[1]!);
     }
 
     private static bool IsSpecialRolloutPath(string value)

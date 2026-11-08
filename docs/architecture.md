@@ -7,7 +7,10 @@
 | `Catalog.cs` | 支持的数据库结构指纹、桌面状态字段清单 |
 | `Cleaner.cs` | 路径安全、数据指纹、读写互斥、跨进程写入锁、快照、故障材料检查 |
 | `Cleaner.Plan.cs` | 每个数据库的删除动作、桌面状态与索引改写、预览与失效引用检查 |
-| `Cleaner.Execute.cs` | 备份、事务执行、结果校验、自动回滚、事务目录清理 |
+| `Cleaner.Execute.cs` | 备份、事务执行、结果校验、自动回滚、事务目录清理；Codex 运行时的逐库执行 |
+| `Cleaner.Conversation.cs` | 从 `thread_history_1.sqlite` 的 `thread_items` 只读读取对话 |
+| `ThreadLocks.cs` | `thread-writer-locks` 写入锁的检测与占用 |
+| `Rollouts.cs` | 会话文件索引：按首行 `session_meta` 归属聊天，识别分段、`.jsonl.zst` 副本和分叉引用 |
 | `DesktopState.cs` | `.codex-global-state.json` 中本机聊天引用的识别与清理 |
 | `AutomationToml.cs` | 自动化定义中目标聊天的识别 |
 | `CodexProcesses.cs` | Codex 进程检测 |
@@ -47,9 +50,28 @@
 5. 提交后校验：目标行已不存在、`quick_check` 通过、文件已删除或内容一致。全部通过后删除事务目录。
 6. 任何一步失败：回滚未提交的事务，用备份还原已修改的数据库和文件并逐个校验。还原成功则删除事务目录；还原失败则把状态写成 `needs-recovery` 并保留材料，之后的写入会被拒绝。
 
+执行前还会占用所选聊天的写入锁（见下节），防止清理中途启动的 Codex 打开它们。
+
+## Codex 运行时的清理
+
+Codex 对每个加载的聊天用 `LockFileEx` 锁住 `thread-writer-locks/<id>.lock`，并通过 `.coordination.lock` 串行化锁文件的创建、探测和删除（上游 `codex-rs/thread-store/src/local/writer_lock.rs`）。本工具遵循同一协议：锁住的聊天标为“使用中”，不能清理；只有锁文件但无人持有的不算使用中。
+
+运行时生成的预览不跟踪共享数据库、桌面状态和索引的整体指纹（Codex 一直在写），改为记录所选聊天的 `updated_at_ms` 和会话文件指纹。执行流程：
+
+1. 取得会话整理锁 `.tmp/rollout-maintenance.lock`（上游压缩与迁移替换会话文件时使用），再按 ID 顺序占用所选聊天的写入锁；任一已被 Codex 持有则拒绝。
+2. 复查结构指纹、自动化引用、分叉引用、会话文件指纹和每个聊天的更新时间。
+3. 除 `state_5.sqlite` 外的数据库逐个 `BEGIN IMMEDIATE`、删除、校验后提交；失败只回滚当前库。
+4. 删除会话文件；在与 Codex 相同的文件锁下原地改写 `session_index.jsonl` 和 `history.jsonl`。
+5. 最后删除 `state_5.sqlite` 中的聊天记录。之前任何一步失败，聊天仍在列表中，可重新预览继续。
+6. 释放写入锁并删除锁文件。
+
+不修改 `.codex-global-state.json`（桌面应用会整体回写），也不允许清空全部记忆或共享历史。残留的界面引用由退出 Codex 后的“检查失效引用”清除。
+
+删除前用与上游 `RolloutReferenceIndex` 相同的规则扫描 `sessions/` 与 `archived_sessions/`：首行 `session_meta.payload.id` 相同的文件都属于该聊天（含分段与 `.jsonl.zst`），`history_base.thread_id` 指向它的其他聊天未被一并选择时拒绝删除。
+
 多个 SQLite 文件和普通文件之间没有操作系统级的原子提交。事务副本用于自动回滚可捕获的失败，不能保证断电后无需人工处理。
 
-进程检测按进程名识别 Codex 命令行，按程序路径识别商店版 Codex 包（`WindowsApps\OpenAI.Codex_*`）和数据目录内的 Codex 程序（例如插件用的 `.plugin-appserver\codex.exe`）。两个常驻辅助程序不计入：商店版随系统启动的 `codex-windows-sandbox-service`，以及浏览器插件的原生通信桥 `extension-host`（由浏览器按需重启，只把消息转给 `codex.exe`，本身不链接 SQLite、不写聊天数据库）。真正写数据的 `codex.exe` 仍会被检测到。检测和文件指纹无法防御同一账户下恶意程序的并发替换；使用者需要停止所有写入目标目录的程序。
+Codex 退出时，进程检测按进程名识别 Codex 命令行，按程序路径识别商店版 Codex 包（`WindowsApps\OpenAI.Codex_*`）和数据目录内的 Codex 程序（例如插件用的 `.plugin-appserver\codex.exe`）。两个常驻辅助程序不计入：商店版随系统启动的 `codex-windows-sandbox-service`，以及浏览器插件的原生通信桥 `extension-host`（由浏览器按需重启，只把消息转给 `codex.exe`，本身不链接 SQLite、不写聊天数据库）。真正写数据的 `codex.exe` 仍会被检测到。检测和文件指纹无法防御同一账户下恶意程序的并发替换；使用者需要停止所有写入目标目录的程序。
 
 ## 目录
 

@@ -11,6 +11,7 @@ internal sealed class ConfirmDialog : Form
     private static readonly Color Danger = Color.FromArgb(190, 55, 64);
     private readonly Func<ProcessState> processState;
     private readonly DateTimeOffset expiresAt;
+    private readonly bool live;
     private readonly Button confirm;
     private readonly Label gate = new() { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
     private readonly System.Windows.Forms.Timer timer = new() { Interval = 1500 };
@@ -20,6 +21,7 @@ internal sealed class ConfirmDialog : Form
     {
         this.processState = processState;
         expiresAt = plan.ExpiresAt;
+        live = plan.Live;
         AutoScaleDimensions = new SizeF(96, 96);
         AutoScaleMode = AutoScaleMode.Dpi;
         Text = plan.Repair ? "核对失效引用修复" : "核对清理范围";
@@ -68,7 +70,9 @@ internal sealed class ConfirmDialog : Form
             BackColor = recordOnly.Count > 0 ? Color.FromArgb(255, 244, 222) : Color.FromArgb(234, 240, 253),
             ForeColor = recordOnly.Count > 0 ? Color.FromArgb(146, 88, 20) : Ink,
             TextAlign = ContentAlignment.MiddleLeft,
-            Text = recordOnly.Count > 0
+            Text = plan.Live
+                ? "Codex 正在运行：只删除未在使用的聊天，执行时会锁住它们，防止 Codex 同时打开。\n置顶、草稿等桌面界面引用暂不修改，退出 Codex 后点击「检查失效引用」清除。"
+                : recordOnly.Count > 0
                 ? $"其中 {recordOnly.Count} 条仅清理本地记录与关联数据，原会话文件会保留。\n这些文件以后可能被重新导入；请查看“保留的会话文件”。"
                 : plan.Repair ? "仅修复已失效的本机引用，保留有效聊天和项目。" : "确认后会直接删除所列内容，本工具不提供撤销。请核对下方的附加清理范围。",
         };
@@ -190,11 +194,13 @@ internal sealed class ConfirmDialog : Form
             if (IsDisposed) return;
             var expired = DateTimeOffset.Now >= expiresAt;
             var running = process.Running || process.Processes.Count > 0;
-            confirm.Enabled = !expired && !running;
+            // A live plan runs beside Codex; a plan made while Codex was stopped needs it to stay stopped.
+            var blocked = running && !live;
+            confirm.Enabled = !expired && !blocked;
             gate.Text = expired ? "预览已过期，请返回重新预览。"
-                : running ? "请先退出 Codex，退出后将自动允许确认。"
-                : $"可以执行 · 此预览有效至 {expiresAt.ToLocalTime():HH:mm}";
-            gate.ForeColor = expired || running ? Color.FromArgb(152, 94, 29) : Color.FromArgb(29, 123, 90);
+                : blocked ? "请先退出 Codex，退出后将自动允许确认。"
+                : $"可以执行{(live ? " · 仅删除未在使用的聊天" : "")} · 此预览有效至 {expiresAt.ToLocalTime():HH:mm}";
+            gate.ForeColor = expired || blocked ? Color.FromArgb(152, 94, 29) : Color.FromArgb(29, 123, 90);
         }
         catch (Exception e) when (e is not OutOfMemoryException)
         {

@@ -10,6 +10,13 @@ public sealed record ChatInfo(string Id, string Title, DateTimeOffset? UpdatedAt
     // Display-only metadata. Never use this value as an I/O target.
     public string? OriginalPath { get; init; }
     public bool CanRemoveRecord { get; init; }
+    // Codex holds this chat's writer lock, so it is loaded in a running Codex process.
+    public bool InUse { get; init; }
+    public long? Messages { get; init; }
+    public long RolloutBytes { get; init; }
+    public IReadOnlyList<string> RolloutFiles { get; init; } = [];
+    // Forks whose history is read from this chat; deleting it alone would break them.
+    public IReadOnlyList<string> ForkChildren { get; init; } = [];
 }
 
 public sealed record DatabaseStatus(bool Present, bool Supported, string? Reason = null);
@@ -23,6 +30,7 @@ public sealed record Snapshot(
     IReadOnlyList<string> Warnings, Capabilities Capabilities, IReadOnlyList<RecoveryIssue> RecoveryIssues)
 {
     internal Dictionary<string, List<string>> AutomationTargets { get; init; } = [];
+    internal RolloutIndex Rollouts { get; init; } = new();
 }
 
 public sealed record Selection(IReadOnlyList<string> ChatIds, bool ClearMemories = false, bool ClearSharedHistory = false)
@@ -43,7 +51,15 @@ public sealed record Plan(
 {
     public bool IsEmpty => Id.Length == 0;
     public long DatabaseRows => Databases.Sum(d => d.RowCount);
+    // Built while Codex was running: executes under the chats' writer locks, one database at a time.
+    public bool Live { get; init; }
 }
+
+public enum ChatRole { User, Assistant, Tool, System }
+
+public sealed record ChatToolCall(string Id, string Name, string Summary, string Arguments, string? Result);
+
+public sealed record ChatMessage(ChatRole Role, string Text, string? Thinking, IReadOnlyList<ChatToolCall> ToolCalls, DateTimeOffset CreatedAt);
 
 public sealed record ExecuteResult(string? ResidualDirectory, string? ResidualError);
 
@@ -62,7 +78,11 @@ internal sealed record Fingerprint(bool Exists, long SizeBytes = 0, string? Sha2
 
 internal sealed record PlanState(
     Plan Public, List<FileWork> Files, List<DatabaseWork> Databases, Dictionary<string, Fingerprint> Fingerprints,
-    List<string> AutomationFiles, List<string> MemoryPaths, DateTimeOffset Expires);
+    List<string> AutomationFiles, List<string> MemoryPaths, DateTimeOffset Expires)
+{
+    // Live plans: threads.updated_at_ms (or updated_at) per chat at preview time.
+    public Dictionary<string, long?> Updated { get; init; } = [];
+}
 
 internal sealed class Manifest
 {
@@ -107,4 +127,5 @@ internal sealed class TestHooks
     public Action<int>? BeforeCommit;
     public Action? BeforeReclaimOpen;
     public Action? BeforeRollback;
+    public Action? AfterThreadLocks;
 }

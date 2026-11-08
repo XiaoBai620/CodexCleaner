@@ -6,7 +6,9 @@ internal static class DesktopTheme
 {
     public static readonly Color Ink = Color.FromArgb(40, 40, 39);
     public static readonly Color Muted = Color.FromArgb(113, 113, 109);
+    public static readonly Color Faint = Color.FromArgb(160, 160, 155);
     public static readonly Color Accent = Color.FromArgb(68, 68, 65);
+    public static readonly Color Hover = Color.FromArgb(241, 241, 237);
     public static readonly Color Navy = Color.FromArgb(25, 41, 65);
     public static readonly Color Canvas = Color.FromArgb(247, 247, 245);
     public static readonly Color Border = Color.FromArgb(229, 229, 225);
@@ -305,5 +307,45 @@ internal sealed class FilterComboBox : ComboBox
         var y = Height / 2f;
         using var arrow = new Pen(DesktopTheme.Muted, 1.5f * scale) { StartCap = LineCap.Round, EndCap = LineCap.Round };
         graphics.DrawLines(arrow, [new PointF(x - 3.5f * scale, y - 1.5f * scale), new PointF(x, y + 2 * scale), new PointF(x + 3.5f * scale, y - 1.5f * scale)]);
+    }
+}
+
+// Pill toggle (ported from DevinCleaner); keeps CheckBox semantics.
+internal sealed class PillToggle : CheckBox
+{
+    private bool hovered;
+
+    public PillToggle(string text)
+    {
+        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+        Text = text;
+        AutoSize = true;
+        Font = new Font("Microsoft YaHei UI", 9f);
+        Padding = new Padding(12, 0, 12, 0);
+        Cursor = Cursors.Hand;
+        UseMnemonic = false;
+    }
+
+    public override Size GetPreferredSize(Size proposedSize)
+    {
+        var text = TextRenderer.MeasureText(Text, Font, Size.Empty, TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+        return new Size(text.Width + Padding.Horizontal, (int)Math.Round(30 * DeviceDpi / 96f));
+    }
+
+    protected override void OnMouseEnter(EventArgs e) { base.OnMouseEnter(e); hovered = true; Invalidate(); }
+    protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); hovered = false; Invalidate(); }
+    protected override void OnEnabledChanged(EventArgs e) { base.OnEnabledChanged(e); Invalidate(); }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        e.Graphics.Clear(DesktopTheme.BackgroundOf(Parent));
+        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        var rect = new Rectangle(1, 1, Width - 3, Height - 3);
+        using var path = DesktopTheme.RoundedRect(rect, rect.Height / 2f);
+        using (var fill = new SolidBrush(Checked ? DesktopTheme.Ink : hovered && Enabled ? DesktopTheme.Hover : Color.White)) e.Graphics.FillPath(fill, path);
+        if (!Checked) { using var pen = new Pen(DesktopTheme.Border); e.Graphics.DrawPath(pen, path); }
+        var ink = !Enabled ? DesktopTheme.Faint : Checked ? Color.White : DesktopTheme.Accent;
+        TextRenderer.DrawText(e.Graphics, Text, Font, ClientRectangle, ink, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
+        if (Focused && ShowFocusCues) { using var pen = new Pen(DesktopTheme.Accent); e.Graphics.DrawPath(pen, path); }
     }
 }
