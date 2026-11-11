@@ -18,7 +18,8 @@ internal sealed class MainForm : Form
     private readonly Button downloadUpdate = DesktopTheme.Button("查看并更新");
     private readonly Label updateNotice = DesktopTheme.Label("", 9.5f, true);
     private readonly Label updateSummary = DesktopTheme.Label("", 8.5f);
-    private readonly Panel updateBanner = new() { Dock = DockStyle.Fill, Padding = new Padding(14, 6, 14, 6), Margin = new Padding(0, 8, 0, 0), BackColor = DesktopTheme.Hover, Visible = false };
+    private readonly SurfacePanel updateBanner = new() { Dock = DockStyle.Fill, CornerRadius = 16,
+        Padding = new Padding(16, 10, 16, 10), Margin = new Padding(0, 8, 0, 12), Visible = false };
     private readonly RowStyle updateRowStyle = new(SizeType.Absolute, 0);
     private AvailableUpdate? availableUpdate;
     private bool checkingUpdate;

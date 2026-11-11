@@ -22,11 +22,33 @@ public sealed class UpdateDialogTests
         using var dialog = Create(Release with { Package = null }, uri => opened = uri);
         dialog.Show();
         Assert.False(Field<Button>(dialog, "install").Enabled);
-        var notes = Descendants(dialog).OfType<TextBox>().Single();
+        Assert.Contains("手动下载", Field<Label>(dialog, "status").Text);
+        Assert.DoesNotContain("点击「下载并重启」", Field<Label>(dialog, "status").Text);
+        var notes = Descendants(dialog).OfType<TextBoxBase>().Single();
         Assert.Contains("在程序内下载", notes.Text);
+        Assert.Contains("本次更新", notes.Text);
+        Assert.DoesNotContain("## ", notes.Text);
         Assert.True(notes.ReadOnly);
         Field<Button>(dialog, "manual").PerformClick();
         Assert.Equal(Release.ReleaseUri, opened);
+        dialog.Close();
+    });
+
+    [Fact]
+    public void ReleaseNotesKeepNestedListsAndCodeReadable() => OnSta(() =>
+    {
+        var notes = "## 新增\n- 普通条目\n  - 子项\n    # 缩进代码\n    - 原样条目\n~~~~ text\n## 围栏代码\n~~~\n- 仍在代码内\n~~~~\n- 代码结束";
+        using var dialog = Create(Release with { Notes = notes });
+        dialog.Show();
+        var text = Descendants(dialog).OfType<TextBoxBase>().Single().Text;
+        Assert.DoesNotContain("## 新增", text);
+        Assert.Contains("• 普通条目", text);
+        Assert.Contains("  • 子项", text);
+        Assert.Contains("    # 缩进代码", text);
+        Assert.Contains("    - 原样条目", text);
+        Assert.Contains("## 围栏代码", text);
+        Assert.Contains("- 仍在代码内", text);
+        Assert.Contains("• 代码结束", text);
         dialog.Close();
     });
 
@@ -48,7 +70,7 @@ public sealed class UpdateDialogTests
         dialog.PerformLayout();
         Application.DoEvents();
         Save(dialog, "update-dialog-minimum");
-        foreach (var button in Descendants(dialog).OfType<Button>())
+        foreach (var button in Descendants(dialog).OfType<Button>().Where(button => button.Visible))
             Assert.True(button.Parent!.ClientRectangle.Contains(button.Bounds), $"{button.Text}: {button.Bounds} outside {button.Parent.ClientRectangle}");
         dialog.Size = normalSize;
         var operation = Start(dialog);
@@ -59,6 +81,7 @@ public sealed class UpdateDialogTests
         PumpUntil(() => Field<ProgressBar>(dialog, "progress").Value == 500 &&
             Field<Label>(dialog, "status").Text.Contains("2.0 / 4.0 MB", StringComparison.Ordinal));
         Assert.Contains("2.0 / 4.0 MB", Field<Label>(dialog, "status").Text);
+        Assert.Contains("50%", Field<Label>(dialog, "status").Text);
         Save(dialog, "update-dialog-downloading");
         pending.SetResult(Prepared(1));
         PumpUntil(() => operation.IsCompleted);
@@ -93,7 +116,8 @@ public sealed class UpdateDialogTests
     [Fact]
     public void DownloadFailureAllowsRetryWithoutClosing() => OnSta(() =>
     {
-        var updater = new StubUpdater((_, _) => Task.FromException<PreparedUpdate>(new InvalidDataException("下载校验失败，请重试。")));
+        var error = "下载校验失败，请重试。\n" + new string('长', 300) + "\n保留材料：C:\\synthetic\\update-test";
+        var updater = new StubUpdater((_, _) => Task.FromException<PreparedUpdate>(new InvalidDataException(error)));
         using var dialog = Create(Release, updater: updater);
         dialog.Show();
         var operation = Start(dialog);
@@ -101,8 +125,123 @@ public sealed class UpdateDialogTests
         operation.GetAwaiter().GetResult();
         Assert.False(dialog.IsDisposed);
         Assert.True(Field<Button>(dialog, "install").Enabled);
-        Assert.Contains("校验失败", Field<Label>(dialog, "status").Text);
+        Assert.True(Field<Button>(dialog, "errorDetails").Visible);
+        var normalSize = dialog.Size;
+        dialog.Size = dialog.MinimumSize;
+        dialog.PerformLayout();
+        Application.DoEvents();
+        foreach (var button in Descendants(dialog).OfType<Button>().Where(button => button.Visible))
+            Assert.True(button.Parent!.ClientRectangle.Contains(button.Bounds), $"{button.Text}: {button.Bounds} outside {button.Parent.ClientRectangle}");
+        Save(dialog, "update-dialog-error-minimum");
+        dialog.Size = normalSize;
+        using var details = (Form)typeof(UpdateDialog).GetMethod("CreateErrorDetails", PrivateInstance)!.Invoke(dialog, null)!;
+        details.Show();
+        Assert.Equal(error.Replace("\n", Environment.NewLine), Descendants(details).OfType<TextBox>().Single().Text.Replace("\r\n", "\n").Replace("\n", Environment.NewLine));
+        Assert.True(Descendants(details).OfType<TextBox>().Single().ReadOnly);
+        Save(details, "update-dialog-error-details");
+        details.Close();
         Save(dialog, "update-dialog-error");
+        dialog.Close();
+    });
+
+    [Fact]
+    public void CancelButtonKeepsDetailsVisibleAndAllowsAnotherDownload() => OnSta(() =>
+    {
+        var second = new TaskCompletionSource<PreparedUpdate>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reports = new List<IProgress<UpdateProgress>>();
+        var updater = new StubUpdater(async (progress, token) =>
+        {
+            reports.Add(progress!);
+            if (reports.Count == 2) return await second.Task;
+            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            return Prepared(1);
+        });
+        var installer = new StubInstaller(_ => { });
+        using var dialog = Create(Release, updater: updater, installer: installer);
+        dialog.Show();
+        var first = Start(dialog);
+        Field<Button>(dialog, "cancel").PerformClick();
+        PumpUntil(() => first.IsCompleted);
+        first.GetAwaiter().GetResult();
+        Assert.False(dialog.IsDisposed);
+        Assert.True(dialog.Visible);
+        Assert.Contains("已取消", Field<Label>(dialog, "status").Text);
+        Assert.Equal("重新下载", Field<Button>(dialog, "install").Text);
+        Assert.True(Field<Button>(dialog, "install").Enabled);
+        Save(dialog, "update-dialog-cancelled");
+        var retry = Start(dialog);
+        reports[0].Report(new UpdateProgress(3 * 1048576, 4 * 1048576, "上一轮延迟进度"));
+        Application.DoEvents();
+        Assert.DoesNotContain("上一轮", Field<Label>(dialog, "status").Text);
+        reports[1].Report(new UpdateProgress(1048576, 4 * 1048576, "正在下载更新…"));
+        PumpUntil(() => Field<Label>(dialog, "status").Text.Contains("25%", StringComparison.Ordinal));
+        second.SetException(new IOException("模拟网络中断。"));
+        PumpUntil(() => retry.IsCompleted);
+        retry.GetAwaiter().GetResult();
+        Assert.Equal(2, updater.Calls);
+        Assert.Equal(0, installer.Calls);
+        dialog.Close();
+    });
+
+    [Fact]
+    public void CancelButtonKeepsModalDialogOpenForRetry() => OnSta(() =>
+    {
+        var updater = new StubUpdater(async (_, token) =>
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            return Prepared(1);
+        });
+        using var dialog = Create(Release, updater: updater);
+        using var timer = new System.Windows.Forms.Timer { Interval = 30 };
+        Task? operation = null;
+        ExceptionDispatchInfo? failure = null;
+        var checkedAfterCancellation = false;
+        timer.Tick += (_, _) =>
+        {
+            try
+            {
+                if (operation is null)
+                {
+                    operation = Start(dialog);
+                    Field<Button>(dialog, "cancel").PerformClick();
+                }
+                else if (operation.IsCompleted)
+                {
+                    operation.GetAwaiter().GetResult();
+                    Assert.True(dialog.Visible);
+                    Assert.Contains("已取消", Field<Label>(dialog, "status").Text);
+                    Assert.Equal("重新下载", Field<Button>(dialog, "install").Text);
+                    Assert.True(Field<Button>(dialog, "install").Enabled);
+                    checkedAfterCancellation = true;
+                    dialog.Close();
+                }
+            }
+            catch (Exception error) { failure = ExceptionDispatchInfo.Capture(error); dialog.Close(); }
+        };
+        dialog.Shown += (_, _) => timer.Start();
+        dialog.ShowDialog();
+        timer.Stop();
+        failure?.Throw();
+        Assert.True(checkedAfterCancellation, "The modal dialog closed before cancellation could be retried.");
+    });
+
+    [Fact]
+    public void ClosingDuringCancellationCleanupFailureKeepsTheErrorAvailable() => OnSta(() =>
+    {
+        var updater = new StubUpdater(async (_, token) =>
+        {
+            try { await Task.Delay(Timeout.InfiniteTimeSpan, token); }
+            catch (OperationCanceledException) { throw new IOException("取消后的临时文件无法清除，请保留材料。" ); }
+            return Prepared(1);
+        });
+        using var dialog = Create(Release, updater: updater);
+        dialog.Show();
+        var operation = Start(dialog);
+        dialog.Close();
+        PumpUntil(() => operation.IsCompleted);
+        operation.GetAwaiter().GetResult();
+        Assert.False(dialog.IsDisposed);
+        Assert.True(Field<Button>(dialog, "errorDetails").Visible);
         dialog.Close();
     });
 

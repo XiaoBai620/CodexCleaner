@@ -1,4 +1,5 @@
 using System.Drawing.Drawing2D;
+using System.Runtime.InteropServices;
 
 namespace CodexCleaner;
 
@@ -142,6 +143,64 @@ internal sealed class ThemeButton : Button
     }
 }
 
+// Keep the native range, value and accessibility provider; only replace its painting.
+internal sealed class ThemedProgressBar : ProgressBar
+{
+    public ThemedProgressBar()
+    {
+        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
+            ControlStyles.SupportsTransparentBackColor | ControlStyles.ResizeRedraw, true);
+        BackColor = Color.Transparent;
+        Style = ProgressBarStyle.Continuous;
+        TabStop = false;
+    }
+
+    protected override Size DefaultSize => new(100, 6);
+
+    protected override void OnDpiChangedAfterParent(EventArgs e) { base.OnDpiChangedAfterParent(e); Invalidate(); }
+    protected override void OnParentChanged(EventArgs e) { base.OnParentChanged(e); Invalidate(); }
+
+    protected override void OnPaintBackground(PaintEventArgs e) => e.Graphics.Clear(DesktopTheme.BackgroundOf(Parent));
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        if (Width < 2 || Height < 2) return;
+        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        var height = Math.Min(Height - 1, Math.Max(1, (int)Math.Round(6 * DeviceDpi / 96f)));
+        var track = new Rectangle(0, (Height - height) / 2, Width - 1, height);
+        using var outline = DesktopTheme.RoundedRect(track, height / 2f);
+        using (var brush = new SolidBrush(DesktopTheme.Border)) e.Graphics.FillPath(brush, outline);
+        var range = (long)Maximum - Minimum;
+        if (range <= 0 || Value <= Minimum) return;
+        var width = Math.Clamp((int)Math.Round(track.Width * ((double)Value - Minimum) / range), 1, track.Width);
+        var filled = new Rectangle(RightToLeft == RightToLeft.Yes && RightToLeftLayout ? track.Right - width : track.Left,
+            track.Top, width, track.Height);
+        using var fill = DesktopTheme.RoundedRect(filled, height / 2f);
+        using var ink = new SolidBrush(DesktopTheme.Ink);
+        e.Graphics.FillPath(ink, fill);
+    }
+
+    protected override void WndProc(ref Message m)
+    {
+        const int print = 0x0317, printClient = 0x0318;
+        if ((m.Msg == print || m.Msg == printClient) && m.WParam != IntPtr.Zero)
+        {
+            // DrawToBitmap supplies its target HDC; avoid the native themed renderer here.
+            using var graphics = Graphics.FromHdc(m.WParam);
+            using var paint = new PaintEventArgs(graphics, ClientRectangle);
+            OnPaintBackground(paint);
+            OnPaint(paint);
+            m.Result = IntPtr.Zero;
+            return;
+        }
+        var message = m.Msg;
+        base.WndProc(ref m);
+        // ProgressBar.Value/Minimum/Maximum are not virtual and have no change events.
+        // Their native messages still update accessibility before scheduling our repaint.
+        if (message is 0x0401 or 0x0402 or 0x0403 or 0x0405 or 0x0406) Invalidate();
+    }
+}
+
 internal class SurfacePanel : Panel
 {
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
@@ -265,11 +324,12 @@ internal sealed class ClearSearchButton : Button
     }
 }
 
-// Retain the native dropdown, accessibility and keyboard behavior; paint its
-// closed face so it shares the search field's spacing, border and chevron.
+// Keep the native list, accessibility and keyboard behavior while sharing the
+// search field's palette and the application's rounded surfaces.
 internal sealed class FilterComboBox : ComboBox
 {
     private bool hovered;
+    private FilterListWindow? listWindow;
 
     public FilterComboBox()
     {
@@ -278,7 +338,7 @@ internal sealed class FilterComboBox : ComboBox
         FlatStyle = FlatStyle.Flat;
         ItemHeight = 32;
         IntegralHeight = false;
-        DropDownHeight = 180;
+        DropDownHeight = 194;
         BackColor = Color.White;
         ForeColor = DesktopTheme.Ink;
         Cursor = Cursors.Hand;
@@ -294,21 +354,154 @@ internal sealed class FilterComboBox : ComboBox
     protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); hovered = false; Invalidate(); }
     protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
     protected override void OnLostFocus(EventArgs e) { base.OnLostFocus(e); Invalidate(); }
-    protected override void OnDropDown(EventArgs e) { base.OnDropDown(e); Invalidate(); }
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        var info = new ComboBoxInfo { Size = Marshal.SizeOf<ComboBoxInfo>() };
+        if (GetComboBoxInfo(Handle, ref info) && info.List != IntPtr.Zero)
+            listWindow = new FilterListWindow(info.List, this);
+    }
+
+    protected override void OnHandleDestroyed(EventArgs e)
+    {
+        listWindow?.ReleaseHandle();
+        listWindow = null;
+        base.OnHandleDestroyed(e);
+    }
+
+    protected override void OnDropDown(EventArgs e)
+    {
+        // All six status filters fit without a scrollbar or a clipped final row.
+        DropDownHeight = ItemHeight * Math.Min(Math.Max(Items.Count, 1), 8) + 2;
+        base.OnDropDown(e);
+        Invalidate();
+    }
     protected override void OnDropDownClosed(EventArgs e) { base.OnDropDownClosed(e); Invalidate(); }
-    protected override void OnSelectedIndexChanged(EventArgs e) { base.OnSelectedIndexChanged(e); Invalidate(); }
+    protected override void OnSelectedIndexChanged(EventArgs e)
+    {
+        base.OnSelectedIndexChanged(e);
+        listWindow?.RefreshItems();
+        Invalidate();
+    }
 
     protected override void OnDrawItem(DrawItemEventArgs e)
     {
         if (e.Index < 0) return;
         var selected = (e.State & DrawItemState.Selected) != 0;
-        using var fill = new SolidBrush(selected ? DesktopTheme.Hover : Color.White);
-        e.Graphics.FillRectangle(fill, e.Bounds);
-        var inset = (int)(10 * DeviceDpi / 96f);
-        var bounds = Rectangle.FromLTRB(e.Bounds.Left + inset, e.Bounds.Top, e.Bounds.Right - inset, e.Bounds.Bottom);
+        using (var background = new SolidBrush(Color.White)) e.Graphics.FillRectangle(background, e.Bounds);
+        var scale = DeviceDpi / 96f;
+        if (selected)
+        {
+            var row = Rectangle.Inflate(e.Bounds, -(int)(5 * scale), -(int)(2 * scale));
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using var rounded = DesktopTheme.RoundedRect(row, 6 * scale);
+            using var fill = new SolidBrush(DesktopTheme.Hover);
+            e.Graphics.FillPath(fill, rounded);
+        }
+        var inset = (int)(12 * scale);
+        var bounds = Rectangle.FromLTRB(e.Bounds.Left + inset, e.Bounds.Top, e.Bounds.Right - (int)(30 * scale), e.Bounds.Bottom);
         TextRenderer.DrawText(e.Graphics, GetItemText(Items[e.Index]), Font, bounds, DesktopTheme.Ink,
-            TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
+            TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+        if (e.Index == SelectedIndex)
+        {
+            var x = e.Bounds.Right - 18 * scale;
+            var y = e.Bounds.Top + e.Bounds.Height / 2f;
+            using var check = new Pen(DesktopTheme.Accent, 1.5f * scale) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+            e.Graphics.DrawLines(check, [new PointF(x - 3 * scale, y), new PointF(x - scale, y + 2 * scale), new PointF(x + 4 * scale, y - 3 * scale)]);
+        }
     }
+
+    private sealed class FilterListWindow : NativeWindow
+    {
+        private readonly FilterComboBox owner;
+        private Size roundedSize;
+
+        public FilterListWindow(IntPtr handle, FilterComboBox owner)
+        {
+            this.owner = owner;
+            AssignHandle(handle);
+        }
+
+        public void RefreshItems()
+        {
+            if (Handle != IntPtr.Zero) InvalidateRect(Handle, IntPtr.Zero, false);
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            const int ncPaint = 0x0085, windowPosChanged = 0x0047;
+            if (m.Msg == ncPaint)
+            {
+                PaintFrame();
+                m.Result = IntPtr.Zero;
+                return;
+            }
+            base.WndProc(ref m);
+            if (m.Msg == windowPosChanged) RoundWindow();
+        }
+
+        private void RoundWindow()
+        {
+            if (!GetWindowRect(Handle, out var rect)) return;
+            var size = new Size(rect.Right - rect.Left, rect.Bottom - rect.Top);
+            if (size == roundedSize || size.Width < 2 || size.Height < 2) return;
+            roundedSize = size;
+            var diameter = (int)Math.Round(16 * owner.DeviceDpi / 96f);
+            var region = CreateRoundRectRgn(0, 0, size.Width + 1, size.Height + 1, diameter, diameter);
+            if (region != IntPtr.Zero && SetWindowRgn(Handle, region, true) == 0) DeleteObject(region);
+        }
+
+        private void PaintFrame()
+        {
+            if (!GetWindowRect(Handle, out var rect)) return;
+            var dc = GetWindowDC(Handle);
+            if (dc == IntPtr.Zero) return;
+            try
+            {
+                using var graphics = Graphics.FromHdc(dc);
+                graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                var bounds = new Rectangle(0, 0, rect.Right - rect.Left - 1, rect.Bottom - rect.Top - 1);
+                if (bounds.Width < 2 || bounds.Height < 2) return;
+                using var path = DesktopTheme.RoundedRect(bounds, 8 * owner.DeviceDpi / 96f);
+                using var border = new Pen(DesktopTheme.Border);
+                graphics.DrawPath(border, path);
+            }
+            finally { ReleaseDC(Handle, dc); }
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect { public int Left, Top, Right, Bottom; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ComboBoxInfo
+    {
+        public int Size;
+        public NativeRect Item, Button;
+        public int ButtonState;
+        public IntPtr Combo, Edit, List;
+    }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetComboBoxInfo(IntPtr window, ref ComboBoxInfo info);
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetWindowRect(IntPtr window, out NativeRect rect);
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetWindowDC(IntPtr window);
+    [DllImport("user32.dll")]
+    private static extern int ReleaseDC(IntPtr window, IntPtr dc);
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool InvalidateRect(IntPtr window, IntPtr rect, [MarshalAs(UnmanagedType.Bool)] bool erase);
+    [DllImport("user32.dll")]
+    private static extern int SetWindowRgn(IntPtr window, IntPtr region, [MarshalAs(UnmanagedType.Bool)] bool redraw);
+    [DllImport("gdi32.dll")]
+    private static extern IntPtr CreateRoundRectRgn(int left, int top, int right, int bottom, int width, int height);
+    [DllImport("gdi32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DeleteObject(IntPtr handle);
 
     protected override void WndProc(ref Message m)
     {

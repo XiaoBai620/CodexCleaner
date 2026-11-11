@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AssemblyName>CodexCleaner.UpdatePreview</AssemblyName>
+    <RootNamespace>CodexCleaner.UpdatePreview</RootNamespace>
+    <Product>CodexCleaner.UpdatePreview</Product>
+    <ApplicationIcon>../../src/CodexCleaner/app.ico</ApplicationIcon>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationVisualStyles>true</ApplicationVisualStyles>
+    <ApplicationDefaultFont>Microsoft YaHei UI, 9pt</ApplicationDefaultFont>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/CodexCleaner/CodexCleaner.csproj" />
+    <EmbeddedResource Include="../../tests/CodexCleaner.Tests/fixture-schema.json"
+                      Link="fixture-schema.json"
+                      LogicalName="CodexCleaner.UpdatePreview.fixture-schema.json" />
+  </ItemGroup>
+</Project>
