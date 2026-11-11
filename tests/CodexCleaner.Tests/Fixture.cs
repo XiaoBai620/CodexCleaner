@@ -53,14 +53,17 @@ public sealed class Fixture : IDisposable
         {
             Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(DataRoot, name))!);
             using var db = Open(name);
+            using var transaction = db.BeginTransaction();
             foreach (var type in new[] { "table", "index", "trigger", "view" })
                 foreach (var o in objects.Where(x => x.Type == type)) Exec(db, o.Sql);
+            transaction.Commit();
         }
         var rollouts = Ids.Select((id, i) => Put($"sessions/2026/09/27/rollout-{id}.jsonl",
             JsonSerializer.Serialize(new { timestamp = "2026-09-27T00:00:00Z", type = "session_meta", payload = new { id, cwd = Base } }) + "\n" +
             JsonSerializer.Serialize(new { timestamp = "2026-09-27T00:00:01Z", type = "response_item", payload = new { type = "message", role = "user", content = new[] { new { type = "input_text", text = $"Invented chat {i + 1}" } } } }) + "\n")).ToArray();
         using (var db = Open("state_5.sqlite"))
         {
+            using var transaction = db.BeginTransaction();
             for (var i = 0; i < Ids.Length; i++)
             {
                 Insert(db, "threads", new() { ["id"] = Ids[i], ["rollout_path"] = rollouts[i], ["created_at"] = 1780000000L + i, ["updated_at"] = 1780001000L + i, ["source"] = "cli", ["model_provider"] = "fixture", ["cwd"] = Base, ["title"] = $"Synthetic chat {i + 1}", ["sandbox_policy"] = "workspace-write", ["approval_mode"] = "on-request" });
@@ -70,8 +73,11 @@ public sealed class Fixture : IDisposable
                 Insert(db, "guardian_review_feedback", new() { ["id"] = $"feedback-{i}", ["thread_id"] = Ids[i], ["record"] = Encoding.UTF8.GetBytes("{\"synthetic\":true}") });
             }
             Insert(db, "thread_spawn_edges", new() { ["parent_thread_id"] = Ids[0], ["child_thread_id"] = Ids[1], ["status"] = "completed" });
+            transaction.Commit();
         }
         using (var db = Open("thread_history_1.sqlite"))
+        {
+            using var transaction = db.BeginTransaction();
             foreach (var id in Ids)
             {
                 Insert(db, "thread_turns", new() { ["thread_id"] = id, ["turn_id"] = "turn", ["rollout_ordinal"] = 1L, ["status"] = "completed" });
@@ -79,28 +85,43 @@ public sealed class Fixture : IDisposable
                 Insert(db, "thread_realtime_items", new() { ["thread_id"] = id, ["item_id"] = "realtime", ["rollout_ordinal"] = 2L, ["created_at_ms"] = 2L, ["item_type"] = "message", ["item_json"] = "{\"text\":\"invented realtime\"}" });
                 Insert(db, "thread_history_projection_state", new() { ["thread_id"] = id, ["next_rollout_byte_offset"] = 0L, ["next_rollout_ordinal"] = 3L });
             }
+            transaction.Commit();
+        }
         using (var db = Open("memories_1.sqlite"))
         {
+            using var transaction = db.BeginTransaction();
             foreach (var id in Ids) Insert(db, "stage1_outputs", new() { ["thread_id"] = id, ["source_updated_at"] = 1L, ["raw_memory"] = "Invented personal preference", ["rollout_summary"] = "Invented summary", ["generated_at"] = 1L });
             Insert(db, "jobs", new() { ["kind"] = "consolidation", ["job_key"] = "global", ["status"] = "complete", ["retry_remaining"] = 0L });
             Insert(db, "consolidation_progress", new() { ["singleton"] = 1L, ["max_thread_count"] = 2L });
+            transaction.Commit();
         }
         using (var db = Open("goals_1.sqlite"))
+        {
+            using var transaction = db.BeginTransaction();
             foreach (var id in Ids)
             {
                 Insert(db, "thread_goals", new() { ["thread_id"] = id, ["goal_id"] = "goal", ["objective"] = "Invented goal", ["status"] = "complete", ["created_at_ms"] = 1L, ["updated_at_ms"] = 1L });
                 Insert(db, "thread_goal_continuation_deferrals", new() { ["thread_id"] = id });
             }
+            transaction.Commit();
+        }
         using (var db = Open("queue_1.sqlite"))
+        {
+            using var transaction = db.BeginTransaction();
             for (var i = 0; i < Ids.Length; i++)
                 Insert(db, "queued_items", new() { ["id"] = $"queued-{i}", ["thread_id"] = Ids[i], ["payload_json"] = "{\"text\":\"invented queued content\"}", ["queue_order"] = (long)i, ["created_at_ms"] = 1L, ["updated_at_ms"] = 1L });
+            transaction.Commit();
+        }
         using (var db = Open("logs_2.sqlite"))
         {
+            using var transaction = db.BeginTransaction();
             foreach (var id in Ids) Insert(db, "logs", new() { ["ts"] = 1L, ["ts_nanos"] = 1L, ["level"] = "INFO", ["target"] = "fixture", ["feedback_log_body"] = "Invented log", ["thread_id"] = id });
             Insert(db, "logs", new() { ["ts"] = 1L, ["ts_nanos"] = 1L, ["level"] = "INFO", ["target"] = "fixture", ["feedback_log_body"] = "Invented unlinked log", ["thread_id"] = null });
+            transaction.Commit();
         }
         using (var db = Open("sqlite/codex-dev.db"))
         {
+            using var transaction = db.BeginTransaction();
             Insert(db, "local_thread_catalog_hosts", new() { ["host_id"] = "local", ["host_kind"] = "local" });
             for (var i = 0; i < Ids.Length; i++)
             {
@@ -111,6 +132,7 @@ public sealed class Fixture : IDisposable
                 Insert(db, "local_thread_catalog_scan_entries", new() { ["host_id"] = "local", ["thread_id"] = Ids[i], ["removed"] = 0L });
                 Insert(db, "thread_timeline_ledger", new() { ["host_id"] = "local", ["thread_id"] = Ids[i], ["sequence"] = 1L, ["record_id"] = $"record-{i}", ["payload_json"] = "{\"text\":\"Invented timeline content\"}" });
             }
+            transaction.Commit();
         }
         Put("session_index.jsonl", string.Concat(Ids.Select((id, i) => JsonSerializer.Serialize(new { id, thread_name = $"Synthetic chat {i + 1}", updated_at = "2026-09-27T00:00:00Z" }) + "\n")));
         Put(".codex-global-state.json", new JsonObject
