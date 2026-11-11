@@ -56,7 +56,8 @@ public sealed class UpdateDialogTests
         Assert.Equal(1, updater.Calls);
         Assert.False(Field<Button>(dialog, "install").Enabled);
         updates!.Report(new UpdateProgress(2 * 1048576, 4 * 1048576, "正在下载更新…"));
-        PumpUntil(() => Field<ProgressBar>(dialog, "progress").Value == 500);
+        PumpUntil(() => Field<ProgressBar>(dialog, "progress").Value == 500 &&
+            Field<Label>(dialog, "status").Text.Contains("2.0 / 4.0 MB", StringComparison.Ordinal));
         Assert.Contains("2.0 / 4.0 MB", Field<Label>(dialog, "status").Text);
         Save(dialog, "update-dialog-downloading");
         pending.SetResult(Prepared(1));

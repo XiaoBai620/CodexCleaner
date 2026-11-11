@@ -114,15 +114,7 @@ internal sealed class UpdateDialog : Form
         PreparedUpdate? prepared = null;
         try
         {
-            var updates = new Progress<UpdateProgress>(value =>
-            {
-                if (IsDisposed || !working || installing || cancellation.IsCancellationRequested) return;
-                progress.Value = value.TotalBytes > 0
-                    ? (int)Math.Clamp(value.ReceivedBytes * 1000 / value.TotalBytes, 0, 1000) : 0;
-                status.Text = value.TotalBytes > 0
-                    ? $"{value.Stage}  {value.ReceivedBytes / 1048576d:0.0} / {value.TotalBytes / 1048576d:0.0} MB"
-                    : value.Stage;
-            });
+            var updates = new Progress<UpdateProgress>(ReportProgress);
             prepared = await updater.DownloadAsync(update, updates, updateToken);
             updateToken.ThrowIfCancellationRequested();
             installing = true;
@@ -161,6 +153,23 @@ internal sealed class UpdateDialog : Form
                 if (closeAfterCancel) Close();
             }
         }
+    }
+
+    private void ReportProgress(UpdateProgress value)
+    {
+        if (IsDisposed || Disposing || !IsHandleCreated) return;
+        if (InvokeRequired)
+        {
+            try { BeginInvoke(() => ReportProgress(value)); }
+            catch (InvalidOperationException) when (IsDisposed || Disposing || !IsHandleCreated) { }
+            return;
+        }
+        if (!working || installing || cancellation.IsCancellationRequested) return;
+        status.Text = value.TotalBytes > 0
+            ? $"{value.Stage}  {value.ReceivedBytes / 1048576d:0.0} / {value.TotalBytes / 1048576d:0.0} MB"
+            : value.Stage;
+        progress.Value = value.TotalBytes > 0
+            ? (int)Math.Clamp(value.ReceivedBytes * 1000 / value.TotalBytes, 0, 1000) : 0;
     }
 
     protected override void Dispose(bool disposing)
