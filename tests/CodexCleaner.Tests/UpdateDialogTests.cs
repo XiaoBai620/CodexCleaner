@@ -158,29 +158,45 @@ public sealed class UpdateDialogTests
         });
         var installer = new StubInstaller(_ => { });
         using var dialog = Create(Release, updater: updater, installer: installer);
-        dialog.Show();
-        var first = Start(dialog);
-        Field<Button>(dialog, "cancel").PerformClick();
-        PumpUntil(() => first.IsCompleted);
-        first.GetAwaiter().GetResult();
-        Assert.False(dialog.IsDisposed);
-        Assert.True(dialog.Visible);
-        Assert.Contains("已取消", Field<Label>(dialog, "status").Text);
-        Assert.Equal("重新下载", Field<Button>(dialog, "install").Text);
-        Assert.True(Field<Button>(dialog, "install").Enabled);
-        Save(dialog, "update-dialog-cancelled");
-        var retry = Start(dialog);
-        reports[0].Report(new UpdateProgress(3 * 1048576, 4 * 1048576, "上一轮延迟进度"));
-        Application.DoEvents();
-        Assert.DoesNotContain("上一轮", Field<Label>(dialog, "status").Text);
-        reports[1].Report(new UpdateProgress(1048576, 4 * 1048576, "正在下载更新…"));
-        PumpUntil(() => Field<Label>(dialog, "status").Text.Contains("25%", StringComparison.Ordinal));
-        second.SetException(new IOException("模拟网络中断。"));
-        PumpUntil(() => retry.IsCompleted);
-        retry.GetAwaiter().GetResult();
+        ExceptionDispatchInfo? failure = null;
+        var completed = false;
+        // Production uses a modal message loop. Keep it active across awaits and
+        // window teardown instead of closing a modeless form between DoEvents calls.
+        dialog.Shown += async (_, _) =>
+        {
+            try
+            {
+                var first = Start(dialog);
+                Field<Button>(dialog, "cancel").PerformClick();
+                await first;
+                Assert.False(dialog.IsDisposed);
+                Assert.True(dialog.Visible);
+                Assert.Contains("已取消", Field<Label>(dialog, "status").Text);
+                Assert.Equal("重新下载", Field<Button>(dialog, "install").Text);
+                Assert.True(Field<Button>(dialog, "install").Enabled);
+                Save(dialog, "update-dialog-cancelled");
+                Assert.IsType<WindowsFormsSynchronizationContext>(SynchronizationContext.Current);
+                var retry = Start(dialog);
+                reports[0].Report(new UpdateProgress(3 * 1048576, 4 * 1048576, "上一轮延迟进度"));
+                await Task.Yield();
+                Assert.DoesNotContain("上一轮", Field<Label>(dialog, "status").Text);
+                reports[1].Report(new UpdateProgress(1048576, 4 * 1048576, "正在下载更新…"));
+                var watch = Stopwatch.StartNew();
+                while (!Field<Label>(dialog, "status").Text.Contains("25%", StringComparison.Ordinal) && watch.Elapsed < TimeSpan.FromSeconds(10))
+                    await Task.Delay(10);
+                Assert.Contains("25%", Field<Label>(dialog, "status").Text);
+                second.SetException(new IOException("模拟网络中断。"));
+                await retry;
+                completed = true;
+            }
+            catch (Exception error) { failure = ExceptionDispatchInfo.Capture(error); }
+            finally { dialog.Close(); }
+        };
+        dialog.ShowDialog();
+        failure?.Throw();
+        Assert.True(completed, "The cancellation and retry scenario did not complete.");
         Assert.Equal(2, updater.Calls);
         Assert.Equal(0, installer.Calls);
-        dialog.Close();
     });
 
     [Fact]
