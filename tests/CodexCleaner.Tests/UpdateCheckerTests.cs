@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace CodexCleaner.Tests;
 
@@ -170,6 +171,178 @@ public sealed class UpdateCheckerTests
         }));
         await Assert.ThrowsAsync<InvalidDataException>(() => Checker(client).CheckAsync(CancellationToken.None));
     }
+
+    [Fact]
+    public async Task ValidReleaseIncludesNotesAndVerifiedRepositoryAssetLocations()
+    {
+        using var client = Client(PackageRelease());
+        var update = Assert.IsType<AvailableUpdate>(await Checker(client).CheckAsync(CancellationToken.None));
+        Assert.Equal("- 支持程序内下载\n- 显示更新进度", update.Notes);
+        var package = Assert.IsType<UpdatePackage>(update.Package);
+        Assert.Equal("https://github.com/XiaoBai620/CodexCleaner/releases/download/v4.0.0/CodexCleaner.exe", package.ExecutableUri.AbsoluteUri);
+        Assert.Equal("https://github.com/XiaoBai620/CodexCleaner/releases/download/v4.0.0/SHA256SUMS.txt", package.ChecksumUri.AbsoluteUri);
+        Assert.Equal(3552552, package.Size);
+        Assert.Equal(new string('a', 64), package.Sha256);
+    }
+
+    [Fact]
+    public async Task NotesAreLimitedAndDisplayedAsLiteralTextWithoutControlCharacters()
+    {
+        using var client = Client(PackageRelease(release => release["body"] =
+            "# 更新\r\n- 下载\u0000\u202e\u200b\t完成\r<script>literal</script>" + new string('x', 20000)));
+        var update = Assert.IsType<AvailableUpdate>(await Checker(client).CheckAsync(CancellationToken.None));
+        Assert.StartsWith("# 更新\n- 下载\t完成\n<script>literal</script>", update.Notes);
+        Assert.Equal(16 * 1024, update.Notes.Length);
+        Assert.DoesNotContain('\0', update.Notes);
+        Assert.DoesNotContain('\u202e', update.Notes);
+        Assert.DoesNotContain('\u200b', update.Notes);
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("42")]
+    [InlineData("{}")]
+    public async Task MissingOrInvalidNotesDoNotHideAnAvailableRelease(string body)
+    {
+        using var client = Client(PackageRelease(release => release["body"] = JsonNode.Parse(body)));
+        var update = Assert.IsType<AvailableUpdate>(await Checker(client).CheckAsync(CancellationToken.None));
+        Assert.Empty(update.Notes);
+        Assert.NotNull(update.Package);
+    }
+
+    [Theory]
+    [InlineData("https://untrusted.invalid/CodexCleaner.exe")]
+    [InlineData("http://github.com/XiaoBai620/CodexCleaner/releases/download/v4.0.0/CodexCleaner.exe")]
+    [InlineData("https://github.com/SomeoneElse/CodexCleaner/releases/download/v4.0.0/CodexCleaner.exe")]
+    [InlineData("https://github.com/XiaoBai620/CodexCleaner/releases/download/v3.0.0/CodexCleaner.exe")]
+    [InlineData("https://github.com/XiaoBai620/CodexCleaner/releases/download/v4.0.0/Other.exe")]
+    [InlineData("https://github.com/XiaoBai620/CodexCleaner/releases/download/v4.0.0/CodexCleaner.exe?token=unexpected")]
+    [InlineData("https://github.com/XiaoBai620/CodexCleaner/releases/download/v4.0.0/CodexCleaner.exe#unexpected")]
+    [InlineData("https://unexpected@github.com/XiaoBai620/CodexCleaner/releases/download/v4.0.0/CodexCleaner.exe")]
+    [InlineData("file:///C:/unexpected.exe")]
+    public async Task UntrustedExecutableUrlsKeepTheManualReleaseAvailable(string url)
+    {
+        using var client = Client(PackageRelease(release => release["assets"]![0]!["browser_download_url"] = url));
+        var update = Assert.IsType<AvailableUpdate>(await Checker(client).CheckAsync(CancellationToken.None));
+        Assert.Null(update.Package);
+        Assert.Equal("https://github.com/XiaoBai620/CodexCleaner/releases/tag/v4.0.0", update.ReleaseUri.AbsoluteUri);
+        Assert.NotEmpty(update.Notes);
+    }
+
+    [Fact]
+    public async Task ChecksumUrlMustAlsoBelongToTheSameRelease()
+    {
+        using var client = Client(PackageRelease(release => release["assets"]![1]!["browser_download_url"] =
+            "https://untrusted.invalid/SHA256SUMS.txt"));
+        Assert.Null((await Checker(client).CheckAsync(CancellationToken.None))!.Package);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(64 * 1024 * 1024 + 1)]
+    public async Task InvalidExecutableSizesDisableInAppDownload(long size)
+    {
+        using var client = Client(PackageRelease(release => release["assets"]![0]!["size"] = size));
+        Assert.Null((await Checker(client).CheckAsync(CancellationToken.None))!.Package);
+    }
+
+    [Fact]
+    public async Task MaximumExecutableSizeIsAccepted()
+    {
+        using var client = Client(PackageRelease(release => release["assets"]![0]!["size"] = 64 * 1024 * 1024));
+        Assert.Equal(64 * 1024 * 1024, (await Checker(client).CheckAsync(CancellationToken.None))!.Package!.Size);
+    }
+
+    [Theory]
+    [InlineData("digest-format")]
+    [InlineData("digest-type")]
+    [InlineData("digest-algorithm")]
+    [InlineData("digest-length")]
+    [InlineData("checksum-digest")]
+    [InlineData("not-uploaded")]
+    [InlineData("checksum-not-uploaded")]
+    [InlineData("checksum-too-large")]
+    [InlineData("checksum-empty")]
+    [InlineData("size-type")]
+    [InlineData("size-fraction")]
+    [InlineData("missing-executable")]
+    [InlineData("missing-checksum")]
+    [InlineData("duplicate-executable")]
+    [InlineData("duplicate-checksum")]
+    [InlineData("assets-type")]
+    public async Task IncompleteOrAmbiguousPackageMetadataDisablesOnlyInAppDownload(string fault)
+    {
+        using var client = Client(PackageRelease(release =>
+        {
+            var assets = release["assets"]!.AsArray();
+            switch (fault)
+            {
+                case "digest-format": assets[0]!["digest"] = "sha256:" + new string('z', 64); break;
+                case "digest-type": assets[0]!["digest"] = 42; break;
+                case "digest-algorithm": assets[0]!["digest"] = "sha512:" + new string('a', 64); break;
+                case "digest-length": assets[0]!["digest"] = "sha256:abcd"; break;
+                case "checksum-digest": assets[1]!["digest"] = "invalid"; break;
+                case "not-uploaded": assets[0]!["state"] = "open"; break;
+                case "checksum-not-uploaded": assets[1]!["state"] = "open"; break;
+                case "checksum-too-large": assets[1]!["size"] = 4097; break;
+                case "checksum-empty": assets[1]!["size"] = 0; break;
+                case "size-type": assets[0]!["size"] = "123"; break;
+                case "size-fraction": assets[0]!["size"] = 1.5; break;
+                case "missing-executable": assets.RemoveAt(0); break;
+                case "missing-checksum": assets.RemoveAt(1); break;
+                case "duplicate-executable": assets.Add(assets[0]!.DeepClone()); break;
+                case "duplicate-checksum": assets.Add(assets[1]!.DeepClone()); break;
+                case "assets-type": release["assets"] = new JsonObject(); break;
+                default: throw new InvalidOperationException(fault);
+            }
+        }));
+        var update = Assert.IsType<AvailableUpdate>(await Checker(client).CheckAsync(CancellationToken.None));
+        Assert.Null(update.Package);
+        Assert.NotEmpty(update.Notes);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task MissingOptionalDigestStillAllowsChecksumVerifiedDownload(bool explicitNull)
+    {
+        using var client = Client(PackageRelease(release =>
+        {
+            var asset = release["assets"]![0]!.AsObject();
+            if (explicitNull) asset["digest"] = null;
+            else asset.Remove("digest");
+        }));
+        var package = Assert.IsType<UpdatePackage>((await Checker(client).CheckAsync(CancellationToken.None))!.Package);
+        Assert.Null(package.Sha256);
+    }
+
+    [Fact]
+    public async Task NoncanonicalStableTagRemainsAvailableForManualDownload()
+    {
+        using var client = Client(PackageRelease(release => release["tag_name"] = "v04.0.0"));
+        var update = Assert.IsType<AvailableUpdate>(await Checker(client).CheckAsync(CancellationToken.None));
+        Assert.Equal(new Version(4, 0, 0), update.Version);
+        Assert.Null(update.Package);
+    }
+
+    private static string PackageRelease(Action<JsonObject>? modify = null)
+    {
+        var release = JsonNode.Parse(Release("v4.0.0"))!.AsObject();
+        release["body"] = "- 支持程序内下载\n- 显示更新进度";
+        release["assets"] = new JsonArray(Asset("CodexCleaner.exe", 3552552), Asset("SHA256SUMS.txt", 83));
+        modify?.Invoke(release);
+        return release.ToJsonString();
+    }
+
+    private static JsonObject Asset(string name, long size) => new()
+    {
+        ["name"] = name,
+        ["state"] = "uploaded",
+        ["size"] = size,
+        ["browser_download_url"] = $"https://github.com/XiaoBai620/CodexCleaner/releases/download/v4.0.0/{name}",
+        ["digest"] = "sha256:" + new string('A', 64),
+    };
 
     private static UpdateChecker Checker(HttpClient client) => new(client, new Version(3, 2, 0));
     private static string Release(string tag, string htmlUrl = "https://untrusted.invalid/update") =>

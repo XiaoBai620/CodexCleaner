@@ -10,7 +10,9 @@ Windows 桌面小工具：选择本机的 Codex 聊天与记忆，核对预览�
 
 需要 64 位 Windows 10/11 和 [.NET 10 桌面运行时](https://dotnet.microsoft.com/download/dotnet/10.0)（Windows Desktop Runtime）。从 [Releases](https://github.com/XiaoBai620/CodexCleaner/releases/latest) 下载 `CodexCleaner.exe`（约 3 MB）双击运行。只需要这一个文件，SQLite 等依赖已打包在内，不需要附带 dll；放在任意目录都能运行，临时事务目录在 `%LOCALAPPDATA%\CodexCleaner`，与 exe 位置无关；没装运行时的话，Windows 会弹窗提示并给出下载地址。工具不占用端口。
 
-启动后会在后台检查 GitHub 上的最新正式版本，有新版本时显示更新提示，也可点击“检查更新”。点击“前往更新”才会打开本项目的发布页，由你下载替换程序，不会自动下载安装。断网或检查失败不影响清理。
+启动后会在后台检查 GitHub 上的最新正式版本，有新版本时显示版本号和简要更新内容，也可点击“检查更新”。点击“查看并更新”阅读完整说明，再点击“下载并重启”，即可在程序内下载、校验并更新；下载时显示进度，可取消。工具会核对 SHA-256、Windows 程序格式和版本，等待当前程序退出后替换并重新启动；替换或启动失败时尝试还原旧程序。清理、恢复等操作进行中，更新入口暂时禁用。断网或检查失败不影响清理。
+
+3.3.0、3.4.0 等旧版需要先从发布页下载新版 exe，关闭旧程序后手动替换一次，之后即可使用内置更新。更新只替换程序，不修改聊天或清理备份；仍可使用更新窗口中的“手动下载”。
 
 1. 按标题或 ID 搜索，也可按状态筛选。点选一行，在右侧查看完整标题、路径、消息数和处理原因；点击“查看对话”或双击行可只读查看对话。勾选框用于选择清理内容。“全选结果”选择当前筛选中的可清理聊天；底部统计包含筛选外已选记录。
 2. Codex 开着也能清理：正在 Codex 中使用（已加载、或有子任务在跑）的聊天标为“使用中”，不能勾选；其他聊天可以直接预览并确认。运行期间不修改桌面界面状态（置顶、草稿等），退出 Codex 后点击“检查失效引用”清除残留。
@@ -21,7 +23,7 @@ Windows 桌面小工具：选择本机的 Codex 聊天与记忆，核对预览�
 
 exe 没有代码签名，首次运行时 SmartScreen 可能提示“未知发布者”（点“更多信息”→“仍要运行”）。可以对照发布页的 `SHA256SUMS.txt` 核对文件：`certutil -hashfile CodexCleaner.exe SHA256`。
 
-默认读取 `CODEX_HOME`，未设置时读取 `%USERPROFILE%\.codex`。聊天与记忆的读取、预览和清理都在本机完成。更新检查仅请求 GitHub 的公开版本信息，不上传聊天、记忆、文件路径、登录信息或本地文件。
+默认读取 `CODEX_HOME`，未设置时读取 `%USERPROFILE%\.codex`。聊天与记忆的读取、预览和清理都在本机完成。更新功能只获取本项目的公开发布信息、程序和校验文件，不上传聊天、记忆、文件路径、登录信息或本地文件。
 
 更多说明见 [使用说明](docs/使用说明.md)，版本变化见 [更新记录](docs/CHANGELOG.md)。
 
@@ -87,4 +89,4 @@ docs/                    使用说明、架构、发布、贡献与安全说明
 
 ## English
 
-CodexCleaner is an independent native Windows utility for reviewing and deleting recognized local Codex chats and memories, with explicit previews and repair of stale local references. It ships as a single small exe that requires the .NET 10 Windows Desktop Runtime, refuses writes to unverified database schemas, deletes idle chats while Codex runs by holding Codex's own per-thread writer locks, and retains verified backups before deletion. Restore requires Codex to be closed and compatible database schemas, skips existing chats, and preserves unrelated data. Interrupted live cleanup has a separate recovery path; multi-file operations are not crash-atomic. It does not erase cloud records or perform forensic disk wiping.
+CodexCleaner is an independent native Windows utility for reviewing and deleting recognized local Codex chats and memories, with explicit previews and repair of stale local references. It ships as a single small exe that requires the .NET 10 Windows Desktop Runtime, refuses writes to unverified database schemas, deletes idle chats while Codex runs by holding Codex's own per-thread writer locks, and retains verified backups before deletion. Restore requires Codex to be closed and compatible database schemas, skips existing chats, and preserves unrelated data. Interrupted live cleanup has a separate recovery path; multi-file operations are not crash-atomic. Version 3.5.0 adds release notes and cancellable in-app downloads, checks SHA-256, executable format and version, then replaces and restarts the program after it exits, with an attempted rollback on replacement or startup failure. Older versions need one manual exe replacement to gain in-app updating. Updates leave chat data and cleanup backups unchanged. It does not erase cloud records or perform forensic disk wiping.

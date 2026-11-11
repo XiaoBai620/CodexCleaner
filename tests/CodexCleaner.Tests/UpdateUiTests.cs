@@ -10,7 +10,8 @@ namespace CodexCleaner.Tests;
 public sealed class UpdateUiTests
 {
     private const BindingFlags PrivateInstance = BindingFlags.Instance | BindingFlags.NonPublic;
-    private static readonly AvailableUpdate NewRelease = new(new Version(3, 3, 0), new Uri("https://github.com/XiaoBai620/CodexCleaner/releases/tag/v3.3.0"));
+    private static readonly AvailableUpdate NewRelease = new(new Version(9, 0, 0), new Uri("https://github.com/XiaoBai620/CodexCleaner/releases/tag/v9.0.0"),
+        "## 更新内容\n- 在程序内下载更新\n- 显示更新说明");
 
     [Fact]
     public void StartupCheckDoesNotBlockLocalUseAndNewReleaseStaysVisible() => OnSta(() =>
@@ -19,15 +20,17 @@ public sealed class UpdateUiTests
         var response = new TaskCompletionSource<AvailableUpdate?>(TaskCreationOptions.RunContinuationsAsynchronously);
         var checker = new StubChecker(_ => response.Task);
         Uri? opened = null;
-        using var form = Create(fixture, checker, uri => opened = uri);
+        AvailableUpdate? shown = null;
+        using var form = Create(fixture, checker, uri => opened = uri, update => { shown = update; return false; });
         form.Show();
         PumpUntil(() => checker.Calls == 1 && Field<Button>(form, "refresh").Enabled);
         Assert.False(Field<Button>(form, "checkUpdates").Enabled);
         Assert.Null(opened);
         response.SetResult(NewRelease);
         PumpUntil(() => Field<Panel>(form, "updateBanner").Visible);
-        Assert.Contains("v3.3.0", Field<Label>(form, "updateNotice").Text);
+        Assert.Contains("v9.0.0", Field<Label>(form, "updateNotice").Text);
         Assert.Contains($"v{UpdateChecker.CurrentVersion}", Field<Label>(form, "updateNotice").Text);
+        Assert.Equal("在程序内下载更新 · 显示更新说明", Field<Label>(form, "updateSummary").Text);
         Assert.Null(opened);
 
         foreach (var size in new[] { new Size(1180, 780), new Size(960, 680) })
@@ -50,7 +53,13 @@ public sealed class UpdateUiTests
         }
 
         Field<Button>(form, "downloadUpdate").PerformClick();
-        Assert.Equal(NewRelease.ReleaseUri, opened);
+        Assert.Equal(NewRelease, shown);
+        Assert.Null(opened);
+        typeof(MainForm).GetField("busy", PrivateInstance)!.SetValue(form, true);
+        shown = null;
+        typeof(MainForm).GetMethod("OpenUpdate", PrivateInstance)!.Invoke(form, null);
+        Assert.Null(shown);
+        typeof(MainForm).GetField("busy", PrivateInstance)!.SetValue(form, false);
         form.Close();
     });
 
@@ -116,8 +125,10 @@ public sealed class UpdateUiTests
         first.GetAwaiter().GetResult();
     });
 
-    private static MainForm Create(Fixture fixture, IUpdateChecker checker, Action<Uri>? open = null) =>
-        new(fixture.Cleaner, checker, open ?? (_ => throw new InvalidOperationException("Unexpected browser launch")))
+    private static MainForm Create(Fixture fixture, IUpdateChecker checker, Action<Uri>? open = null,
+        Func<AvailableUpdate, bool>? show = null) =>
+        new(fixture.Cleaner, checker, open ?? (_ => throw new InvalidOperationException("Unexpected browser launch")),
+            show ?? (_ => throw new InvalidOperationException("Unexpected update dialog")))
         { ShowInTaskbar = false, StartPosition = FormStartPosition.Manual, Location = new Point(-20000, -20000) };
 
     private static T Field<T>(MainForm form, string name) => (T)typeof(MainForm).GetField(name, PrivateInstance)!.GetValue(form)!;

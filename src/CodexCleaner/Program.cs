@@ -5,9 +5,10 @@ namespace CodexCleaner;
 internal static class Program
 {
     [STAThread]
-    private static void Main()
+    private static void Main(string[] args)
     {
         ApplicationConfiguration.Initialize();
+        if (UpdateInstaller.TryRun(args)) return;
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
         Application.ThreadException += (_, e) => MessageBox.Show(e.Exception.Message, "Codex 本地清理台", MessageBoxButtons.OK, MessageBoxIcon.Error);
         Cleaner cleaner;
@@ -17,6 +18,8 @@ internal static class Program
             MessageBox.Show(e.Message, "Codex 本地清理台", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return;
         }
-        Application.Run(new MainForm(cleaner));
+        using var form = new MainForm(cleaner);
+        form.Shown += (_, _) => UpdateInstaller.ConfirmStartup();
+        Application.Run(form);
     }
 }

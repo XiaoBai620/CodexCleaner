@@ -7,7 +7,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <Version>3.4.0</Version>
+    <Version>3.5.0</Version>
     <AssemblyTitle>Codex 本地清理台</AssemblyTitle>
     <Product>CodexCleaner</Product>
     <Company>XiaoBai620</Company>

@@ -12,10 +12,12 @@ internal sealed class MainForm : Form
     private readonly Cleaner cleaner;
     private readonly IUpdateChecker updateChecker;
     private readonly Action<Uri> openReleasePage;
+    private readonly Func<AvailableUpdate, bool> showUpdate;
     private readonly CancellationTokenSource updateCancellation = new();
     private readonly Button checkUpdates = DesktopTheme.Button("检查更新");
-    private readonly Button downloadUpdate = DesktopTheme.Button("前往更新");
+    private readonly Button downloadUpdate = DesktopTheme.Button("查看并更新");
     private readonly Label updateNotice = DesktopTheme.Label("", 9.5f, true);
+    private readonly Label updateSummary = DesktopTheme.Label("", 8.5f);
     private readonly Panel updateBanner = new() { Dock = DockStyle.Fill, Padding = new Padding(14, 6, 14, 6), Margin = new Padding(0, 8, 0, 0), BackColor = DesktopTheme.Hover, Visible = false };
     private readonly RowStyle updateRowStyle = new(SizeType.Absolute, 0);
     private AvailableUpdate? availableUpdate;
@@ -58,11 +60,17 @@ internal sealed class MainForm : Form
     private bool busy, rendering, checkingProcess;
     private string activity = "正在处理";
 
-    public MainForm(Cleaner cleaner, IUpdateChecker? updateChecker = null, Action<Uri>? openReleasePage = null)
+    public MainForm(Cleaner cleaner, IUpdateChecker? updateChecker = null, Action<Uri>? openReleasePage = null,
+        Func<AvailableUpdate, bool>? showUpdate = null)
     {
         this.cleaner = cleaner;
         this.updateChecker = updateChecker ?? new UpdateChecker();
         this.openReleasePage = openReleasePage ?? (uri => Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }));
+        this.showUpdate = showUpdate ?? (update =>
+        {
+            using var dialog = new UpdateDialog(update, this.openReleasePage);
+            return dialog.ShowDialog(this) == DialogResult.OK;
+        });
         var version = UpdateChecker.CurrentVersion;
         Text = $"Codex 本地清理台 {version.Major}.{version.Minor}.{version.Build}";
         Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!);
@@ -141,7 +149,7 @@ internal sealed class MainForm : Form
         DpiChanged += (_, _) => BeginInvoke(() =>
         {
             ApplyGridMetrics();
-            if (availableUpdate is not null) updateRowStyle.Height = 52 * DeviceDpi / 96f;
+            if (availableUpdate is not null) updateRowStyle.Height = 88 * DeviceDpi / 96f;
         });
         KeyDown += async (_, e) =>
         {
@@ -208,12 +216,20 @@ internal sealed class MainForm : Form
         row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         row.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        var text = CreateLayout(1, 2);
+        text.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
+        text.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         updateNotice.Dock = DockStyle.Fill;
         updateNotice.TextAlign = ContentAlignment.MiddleLeft;
         updateNotice.AutoEllipsis = true;
         updateNotice.ForeColor = DesktopTheme.Accent;
+        updateSummary.Dock = DockStyle.Fill;
+        updateSummary.AutoEllipsis = true;
+        updateSummary.AccessibleName = "新版本更新摘要";
+        text.Controls.Add(updateNotice, 0, 0);
+        text.Controls.Add(updateSummary, 0, 1);
         downloadUpdate.Anchor = AnchorStyles.Right;
-        row.Controls.Add(updateNotice, 0, 0);
+        row.Controls.Add(text, 0, 0);
         row.Controls.Add(downloadUpdate, 1, 0);
         updateBanner.Controls.Add(row);
         return updateBanner;
@@ -231,15 +247,17 @@ internal sealed class MainForm : Form
             if (IsDisposed || updateCancellation.IsCancellationRequested) return;
             availableUpdate = update;
             updateBanner.Visible = update is not null;
-            updateRowStyle.Height = update is null ? 0 : 52 * DeviceDpi / 96f;
+            updateRowStyle.Height = update is null ? 0 : 88 * DeviceDpi / 96f;
             if (update is not null)
             {
                 updateNotice.Text = $"发现新版本 v{update.Version} · 当前 v{UpdateChecker.CurrentVersion}";
                 tip.SetToolTip(updateNotice, updateNotice.Text);
-                tip.SetToolTip(downloadUpdate, "打开 GitHub 发布页，下载新版后退出并替换程序。");
+                updateSummary.Text = UpdateSummary(update.Notes);
+                tip.SetToolTip(updateSummary, updateSummary.Text);
+                tip.SetToolTip(downloadUpdate, "查看更新内容，在程序内下载、校验并重启更新。");
             }
             checkUpdates.Text = update is null && manual ? "已是最新版本" : "检查更新";
-            tip.SetToolTip(checkUpdates, update is null ? "当前已是最新正式版。点击可重新检查。" : "发现新版本，点击「前往更新」查看发布说明和下载。");
+            tip.SetToolTip(checkUpdates, update is null ? "当前已是最新正式版。点击可重新检查。" : "发现新版本，点击「查看并更新」查看更新内容并安装。");
         }
         catch (Exception error) when (error is HttpRequestException or IOException or InvalidDataException or JsonException or OperationCanceledException)
         {
@@ -257,11 +275,20 @@ internal sealed class MainForm : Form
     private void OpenUpdate()
     {
         if (availableUpdate is null || busy) return;
-        try { openReleasePage(availableUpdate.ReleaseUri); }
+        try { if (showUpdate(availableUpdate)) Close(); }
         catch (Exception error) when (error is Win32Exception or InvalidOperationException)
         {
-            MessageBox.Show(this, $"无法打开浏览器，请访问发布页：\n{availableUpdate.ReleaseUri.AbsoluteUri}", "前往更新", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show(this, $"无法启动更新，请稍后重试。\n{error.Message}", "更新未完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
+    }
+
+    private static string UpdateSummary(string notes)
+    {
+        var lines = notes.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(line => !line.StartsWith('#')).Take(2).Select(line => line.TrimStart('-', '*', ' '));
+        var summary = string.Join(" · ", lines);
+        if (string.IsNullOrWhiteSpace(summary)) return "点击「查看并更新」查看版本详情并安装。";
+        return summary.Length > 150 ? summary[..150] + "…" : summary;
     }
 
     private Control BuildProcessBanner()
