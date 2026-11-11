@@ -24,7 +24,7 @@ jobs:
         with:
           dotnet-version: '10.0.x'
       - name: Test with synthetic data
-        run: dotnet test tests/CodexCleaner.Tests -c Release
+        run: dotnet test tests/CodexCleaner.Tests -c Release --logger "console;verbosity=normal" --blame-hang-timeout 3m --blame-hang-dump-type none --results-directory TestResults
       - name: Publish exe
         run: dotnet publish src/CodexCleaner -c Release -o dist
       - name: Check tag matches project version
